@@ -218,9 +218,12 @@ export default function PoolsPage() {
                     <td className="px-4 py-4">{pool.utilization}</td>
                     <td className="px-4 py-4 font-semibold text-emerald-600 dark:text-emerald-400">{pool.apr}</td>
                     <td className="px-4 py-4 text-right">
-                      <button className="rounded-full border border-zinc-200 px-3 py-1 text-xs font-semibold text-zinc-600 transition hover:border-emerald-400 hover:text-emerald-500 dark:border-zinc-700 dark:text-zinc-300">
-                        Provide
-                      </button>
+                      <Link
+                        href={`/pools/${pool.id}`}
+                        className="inline-block rounded-full border border-zinc-200 px-3 py-1 text-xs font-semibold text-zinc-600 transition hover:border-emerald-400 hover:text-emerald-500 dark:border-zinc-700 dark:text-zinc-300"
+                      >
+                        View Pool
+                      </Link>
                     </td>
                   </tr>
                 );
