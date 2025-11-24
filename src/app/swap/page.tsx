@@ -2,171 +2,121 @@
 
 import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
-import { useAccount, useChainId, usePublicClient, useWalletClient } from "wagmi";
+import { useAccount, useChainId } from "wagmi";
 
 import { networks } from "@/config/wagmi";
 import { shortenAddress } from "@/lib/utils";
-import { 
-  getPoolId, 
-  getPool, 
-  swap, 
-  getAllPools,
-  AMM_CONTRACT_ADDRESS,
-  type PoolInfo 
-} from "@/lib/amm";
-import { publicClientToProvider, walletClientToSigner } from "@/config/adapter";
+import { BrowserProvider, parseUnits, formatUnits } from "ethers";
+import amm from "@/lib/amm";
+
+// Add real addresses when available. These are placeholders used for example.
+const ROUTER_ADDRESS = process.env.NEXT_PUBLIC_ROUTER_ADDRESS ?? "0x0000000000000000000000000000000000000000";
+const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_FACTORY_ADDRESS ?? "0x0000000000000000000000000000000000000000";
+
+const tokens = [
+  { symbol: "ETH", name: "Ethereum", address: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", balance: "12.46", price: 2980.2, decimals: 18 },
+  { symbol: "USDC", name: "USD Coin", address: "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", balance: "42300.12", price: 1.0, decimals: 6 },
+  { symbol: "WBTC", name: "Wrapped Bitcoin", address: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", balance: "2.14", price: 58420.15, decimals: 8 },
+  { symbol: "ARB", name: "Arbitrum", address: "0x0000000000000000000000000000000000000001", balance: "18920.00", price: 1.23, decimals: 18 },
+];
 
 const slippageOptions = ["0.3%", "0.5%", "1.0%"];
+const routeLegs = [
+  {
+    step: "①",
+    description: "ETH → WETH",
+    detail: "Wrapped on-chain (0% fee)",
+    weight: "100%",
+  },
+  {
+    step: "②",
+    description: "WETH → USDC",
+    detail: "QuantumDEX v3 (0.01% fee tier)",
+    weight: "85%",
+  },
+  {
+    step: "③",
+    description: "WETH → USDC",
+    detail: "Aggregator partner (0.03% fee tier)",
+    weight: "15%",
+  },
+];
 
 export default function SwapPage() {
   const { isConnected, address } = useAccount();
   const chainId = useChainId();
-  const publicClient = usePublicClient();
-  const { data: walletClient } = useWalletClient();
 
-  const [tokenInAddress, setTokenInAddress] = useState("");
-  const [tokenOutAddress, setTokenOutAddress] = useState("");
-  const [amountIn, setAmountIn] = useState("");
+  const [sellToken, setSellToken] = useState(tokens[0]);
+  const [buyToken, setBuyToken] = useState(tokens[1]);
   const [slippage, setSlippage] = useState("0.5%");
   const [advancedMode, setAdvancedMode] = useState(false);
-  const [poolInfo, setPoolInfo] = useState<PoolInfo | null>(null);
-  const [poolId, setPoolId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [txLoading, setTxLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [sellAmount, setSellAmount] = useState<string>("");
+  const [estimatedBuyAmount, setEstimatedBuyAmount] = useState<string>("");
+  const [submitting, setSubmitting] = useState(false);
 
   const activeNetwork = useMemo(
     () => (chainId ? networks.find((item) => item.id === chainId) : undefined),
     [chainId],
   );
 
-  // Find pool when tokens are set
+  const [quote, setQuote] = useState<null | {
+    sellAmount: string;
+    buyAmount: string;
+    minReceived: string;
+    executionPrice: string;
+    impact: string;
+    routeCount: number;
+  }>(null);
+
+  // Fetch on-chain quote when sellAmount or tokens change.
   useEffect(() => {
-    const findPool = async () => {
-      if (!tokenInAddress || !tokenOutAddress || !publicClient || !AMM_CONTRACT_ADDRESS) {
-        setPoolInfo(null);
-        setPoolId(null);
-        return;
-      }
-
+    let mounted = true;
+    setQuote(null);
+    if (!isConnected || !sellAmount || !sellToken || !buyToken) return;
+    // create a provider for reads; uses injected provider for the current network
+    if (!window.ethereum) return;
+    const provider = new BrowserProvider(window.ethereum as any);
+    (async () => {
       try {
-        setLoading(true);
-        const provider = publicClientToProvider(publicClient);
-        if (!provider) return;
-
-        // Get default fee (30 bps = 0.30%)
-        const feeBps = 30;
-        const poolIdResult = await getPoolId(tokenInAddress, tokenOutAddress, feeBps, AMM_CONTRACT_ADDRESS, provider);
-        setPoolId(poolIdResult);
-
-        const pool = await getPool(poolIdResult, AMM_CONTRACT_ADDRESS, provider);
-        setPoolInfo(pool);
-      } catch (err) {
-        console.error("Error finding pool:", err);
-        setPoolInfo(null);
-        setPoolId(null);
-      } finally {
-        setLoading(false);
+        const out = await amm.getQuote(
+          provider as any,
+          ROUTER_ADDRESS,
+          sellToken.address,
+          buyToken.address,
+          sellAmount,
+          sellToken.decimals ?? 18,
+          buyToken.decimals ?? 18,
+          undefined,
+          FACTORY_ADDRESS,
+        );
+        if (!mounted) return;
+        if (!out) {
+          setQuote(null);
+          return;
+        }
+        const buyHuman = formatUnits(out, buyToken.decimals ?? 18);
+        const minReceived = (Number(buyHuman) * 0.995).toFixed(6);
+        setQuote({
+          sellAmount: sellAmount,
+          buyAmount: buyHuman,
+          minReceived,
+          executionPrice: `1 ${sellToken.symbol} ≈ ${(Number(sellToken.price as number) / Number(buyToken.price as number)).toFixed(6)} ${buyToken.symbol}`,
+          impact: "~0.04%",
+          routeCount: 1,
+        });
+      } catch (e) {
+        console.error("quote error", e);
+        if (mounted) setQuote(null);
       }
+    })();
+    return () => {
+      mounted = false;
     };
-
-    findPool();
-  }, [tokenInAddress, tokenOutAddress, publicClient]);
-
-  // Calculate quote
-  const quote = useMemo(() => {
-    if (!poolInfo || !amountIn || !poolId) return null;
-
-    try {
-      const amountInBigInt = BigInt(Math.floor(parseFloat(amountIn) * 1e18));
-      const reserveIn = tokenInAddress.toLowerCase() === poolInfo.token0.toLowerCase() 
-        ? poolInfo.reserve0 
-        : poolInfo.reserve1;
-      const reserveOut = tokenInAddress.toLowerCase() === poolInfo.token0.toLowerCase()
-        ? poolInfo.reserve1
-        : poolInfo.reserve0;
-
-      // Apply fee (30 bps = 0.30%)
-      const amountInWithFee = (amountInBigInt * BigInt(10000 - poolInfo.feeBps)) / BigInt(10000);
-      
-      // Constant product formula: amountOut = (amountInWithFee * reserveOut) / (reserveIn + amountInWithFee)
-      const amountOut = (amountInWithFee * reserveOut) / (reserveIn + amountInWithFee);
-      
-      // Calculate slippage
-      const slippagePercent = parseFloat(slippage.replace("%", ""));
-      const minAmountOut = (amountOut * BigInt(Math.floor((100 - slippagePercent) * 100))) / BigInt(10000);
-
-      return {
-        amountOut: (Number(amountOut) / 1e18).toFixed(6),
-        minAmountOut: (Number(minAmountOut) / 1e18).toFixed(6),
-        executionPrice: `1 ${shortenAddress(tokenInAddress, 4)} = ${(Number(amountOut) / Number(amountInBigInt) * 1e18).toFixed(6)} ${shortenAddress(tokenOutAddress, 4)}`,
-        impact: "—", // Would need to calculate
-      };
-    } catch {
-      return null;
-    }
-  }, [poolInfo, amountIn, tokenInAddress, tokenOutAddress, slippage, poolId]);
+  }, [isConnected, sellAmount, sellToken, buyToken]);
 
   const handleFlip = () => {
-    const temp = tokenInAddress;
-    setTokenInAddress(tokenOutAddress);
-    setTokenOutAddress(temp);
-    setAmountIn("");
-  };
-
-  const handleSwap = async () => {
-    if (!isConnected || !walletClient || !address || !poolId || !poolInfo || !AMM_CONTRACT_ADDRESS) {
-      setError("Please connect your wallet and ensure pool exists");
-      return;
-    }
-
-    if (!amountIn || !quote) {
-      setError("Please enter amount to swap");
-      return;
-    }
-
-    try {
-      setTxLoading(true);
-      setError(null);
-      setSuccess(null);
-
-      const signer = await walletClientToSigner(walletClient);
-      if (!signer) {
-        throw new Error("Failed to get signer");
-      }
-
-      const amountInBigInt = BigInt(Math.floor(parseFloat(amountIn) * 1e18));
-      const slippagePercent = parseFloat(slippage.replace("%", ""));
-      const minAmountOut = BigInt(Math.floor(parseFloat(quote.minAmountOut) * 1e18));
-
-      const result = await swap(
-        poolId,
-        tokenInAddress,
-        amountInBigInt,
-        minAmountOut,
-        address,
-        AMM_CONTRACT_ADDRESS,
-        signer
-      );
-
-      setSuccess(`Swap successful! Received ${(Number(result.amountOut) / 1e18).toFixed(6)} tokens.`);
-      setAmountIn("");
-
-      // Refresh pool info
-      if (publicClient) {
-        const provider = publicClientToProvider(publicClient);
-        if (provider) {
-          const pool = await getPool(poolId, AMM_CONTRACT_ADDRESS, provider);
-          setPoolInfo(pool);
-        }
-      }
-    } catch (err) {
-      console.error("Error executing swap:", err);
-      setError(err instanceof Error ? err.message : "Failed to execute swap");
-    } finally {
-      setTxLoading(false);
-    }
+    setSellToken(buyToken);
+    setBuyToken(sellToken);
   };
 
   return (
@@ -220,28 +170,33 @@ export default function SwapPage() {
               </div>
               <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
                 <div className="relative flex flex-1 items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder="0x... (token address)"
-                    value={tokenInAddress}
-                    onChange={(e) => setTokenInAddress(e.target.value)}
-                    className="w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 focus:border-emerald-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  />
+                  <select
+                    className="w-full appearance-none rounded-2xl border border-zinc-200 bg-white px-4 py-3 pr-10 text-sm font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                    value={sellToken.symbol}
+                    onChange={(event) =>
+                      setSellToken(tokens.find((token) => token.symbol === event.target.value) ?? tokens[0])
+                    }
+                  >
+                    {tokens.map((token) => (
+                      <option key={token.symbol} value={token.symbol}>
+                        {token.symbol} · {token.name}
+                      </option>
+                    ))}
+                  </select>
                   <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs text-zinc-400">▾</span>
                 </div>
                 <input
                   type="number"
                   placeholder={isConnected ? "0.0" : "Connect wallet"}
                   disabled={!isConnected}
-                  value={amountIn}
-                  onChange={(e) => setAmountIn(e.target.value)}
-                  step="0.000000000000000001"
+                  value={sellAmount}
+                  onChange={(e) => setSellAmount(e.target.value)}
                   className="w-full max-w-[160px] rounded-2xl border border-transparent bg-transparent text-right text-3xl font-semibold tracking-tight text-zinc-900 outline-none placeholder:text-zinc-300 dark:text-zinc-100"
                 />
               </div>
               <div className="flex flex-wrap items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
-                <span>Balance: —</span>
-                <span>Token: {tokenInAddress ? shortenAddress(tokenInAddress, 6) : "—"}</span>
+                <span>Balance: {sellToken.balance} {sellToken.symbol}</span>
+                <span>Price: {sellToken.price}</span>
               </div>
             </div>
 
@@ -258,26 +213,32 @@ export default function SwapPage() {
               <div className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">Buy</div>
               <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
                 <div className="relative flex flex-1 items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder="0x... (token address)"
-                    value={tokenOutAddress}
-                    onChange={(e) => setTokenOutAddress(e.target.value)}
-                    className="w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 focus:border-emerald-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  />
+                  <select
+                    className="w-full appearance-none rounded-2xl border border-zinc-200 bg-white px-4 py-3 pr-10 text-sm font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                    value={buyToken.symbol}
+                    onChange={(event) =>
+                      setBuyToken(tokens.find((token) => token.symbol === event.target.value) ?? tokens[1])
+                    }
+                  >
+                    {tokens.map((token) => (
+                      <option key={token.symbol} value={token.symbol}>
+                        {token.symbol} · {token.name}
+                      </option>
+                    ))}
+                  </select>
                   <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs text-zinc-400">▾</span>
                 </div>
                 <input
                   type="text"
                   placeholder={isConnected ? "~ 0.00" : "—"}
                   disabled
-                  value={quote ? `~ ${quote.amountOut}` : ""}
+                  value={quote?.buyAmount ?? ""}
                   className="w-full max-w-[160px] rounded-2xl border border-transparent bg-transparent text-right text-3xl font-semibold tracking-tight text-emerald-500 outline-none"
                 />
               </div>
               <div className="flex flex-wrap items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
-                <span>Balance: —</span>
-                <span>Token: {tokenOutAddress ? shortenAddress(tokenOutAddress, 6) : "—"}</span>
+                <span>Balance: {buyToken.balance} {buyToken.symbol}</span>
+                <span>Price: {buyToken.price}</span>
               </div>
             </div>
 
@@ -315,40 +276,36 @@ export default function SwapPage() {
               </div>
             </div>
 
-            {error && (
-              <div className="rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-sm text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200">
-                {error}
-              </div>
-            )}
-            
-            {success && (
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200">
-                {success}
-              </div>
-            )}
-
-            {loading && (
-              <div className="rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
-                Finding pool...
-              </div>
-            )}
-
-            {!poolInfo && tokenInAddress && tokenOutAddress && !loading && (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
-                Pool not found for this token pair. Create a pool first.
-              </div>
-            )}
-
             <button
-              onClick={handleSwap}
               className="w-full rounded-2xl bg-emerald-500 py-4 text-base font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:bg-emerald-600 disabled:bg-zinc-300 disabled:text-zinc-500"
-              disabled={!isConnected || !poolInfo || !amountIn || !quote || txLoading}
+              disabled={!isConnected || !sellAmount || submitting}
+              onClick={async () => {
+                if (!isConnected || !sellAmount) return;
+                if (!window.ethereum) return alert("No injected wallet found");
+                try {
+                  setSubmitting(true);
+                  const provider = new BrowserProvider(window.ethereum as any);
+                  const signer = await provider.getSigner();
+                  // precise conversion using ethers.parseUnits
+                  const amountIn = parseUnits(sellAmount, sellToken.decimals ?? 18) as any;
+                  const minOut = quote ? (parseUnits(quote.minReceived, buyToken.decimals ?? 18) as any) : (parseUnits("0", buyToken.decimals ?? 18) as any);
+                  // call helper — router ABI should match your deployed router
+                  const receipt = await amm.swap(signer as any, ROUTER_ADDRESS, sellToken.address, buyToken.address, amountIn, minOut);
+                  console.log("Swap receipt", receipt);
+                  alert("Swap transaction submitted — see console for receipt");
+                } catch (err) {
+                  console.error(err);
+                  alert("Swap failed: " + (((err as any)?.message) ?? "unknown"));
+                } finally {
+                  setSubmitting(false);
+                }
+              }}
             >
-              {txLoading ? "Executing Swap..." : isConnected ? "Execute Swap" : "Connect Wallet to Swap"}
+              {isConnected ? (submitting ? "Submitting…" : "Review & Execute") : "Connect Wallet to Swap"}
             </button>
-            {isConnected && poolInfo ? (
+            {isConnected ? (
               <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
-                Swapping through QuantumDEX pool with {(poolInfo.feeBps / 100).toFixed(2)}% fee.
+                QuantumRouter will batch quotes across {quote?.routeCount ?? 0} pools and settle atomically.
               </p>
             ) : null}
           </div>
@@ -362,28 +319,20 @@ export default function SwapPage() {
             </p>
           </div>
 
-          {poolInfo ? (
-            <div className="space-y-3 rounded-2xl border border-zinc-200 bg-white/60 p-4 dark:border-zinc-800 dark:bg-zinc-950/40">
-              <div className="flex items-start gap-3">
-                <span className="mt-1 text-lg text-emerald-500">①</span>
+          <div className="space-y-3 rounded-2xl border border-zinc-200 bg-white/60 p-4 dark:border-zinc-800 dark:bg-zinc-950/40">
+            {routeLegs.map((leg) => (
+              <div key={leg.step} className="flex items-start gap-3">
+                <span className="mt-1 text-lg text-emerald-500">{leg.step}</span>
                 <div className="flex-1">
                   <div className="flex items-center justify-between text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-                    <span>{shortenAddress(tokenInAddress, 4)} → {shortenAddress(tokenOutAddress, 4)}</span>
-                    <span className="text-xs font-semibold text-emerald-500">100%</span>
+                    <span>{leg.description}</span>
+                    <span className="text-xs font-semibold text-emerald-500">{leg.weight}</span>
                   </div>
-                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                    QuantumDEX AMM ({(poolInfo.feeBps / 100).toFixed(2)}% fee tier)
-                  </p>
+                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{leg.detail}</p>
                 </div>
               </div>
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-zinc-200 bg-white/60 p-4 dark:border-zinc-800 dark:bg-zinc-950/40">
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                Enter token addresses to see swap route
-              </p>
-            </div>
-          )}
+            ))}
+          </div>
 
           {quote ? (
             <div className="rounded-2xl border border-emerald-200/70 bg-emerald-50/70 p-4 text-sm text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200">
@@ -393,11 +342,11 @@ export default function SwapPage() {
               </div>
               <div className="mt-2 flex items-center justify-between">
                 <span>Slippage ({slippage})</span>
-                <span className="font-semibold text-emerald-500">{quote.minAmountOut} min received</span>
+                <span className="font-semibold text-emerald-500">{quote.minReceived} USDC min received</span>
               </div>
               <div className="mt-2 flex items-center justify-between">
-                <span>Amount out</span>
-                <span className="font-semibold text-emerald-500">{quote.amountOut}</span>
+                <span>Price impact</span>
+                <span className="font-semibold text-emerald-500">{quote.impact}</span>
               </div>
             </div>
           ) : (
