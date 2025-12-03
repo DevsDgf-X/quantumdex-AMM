@@ -1,11 +1,8 @@
 import { cookieStorage, createStorage } from "@wagmi/core";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
 import {
-  arbitrum,
   base,
-  mainnet,
-  optimism,
-  polygon,
+  baseSepolia,
 } from "@reown/appkit/networks";
 
 export const projectId = process.env.NEXT_PUBLIC_REOWN_PROJECT_ID;
@@ -14,7 +11,8 @@ if (!projectId) {
   throw new Error("NEXT_PUBLIC_REOWN_PROJECT_ID is required to initialize AppKit");
 }
 
-export const networks = [mainnet, arbitrum, optimism, base, polygon];
+// Primary networks: Base and Base Sepolia
+export const networks = [base, baseSepolia];
 
 export const wagmiAdapter = new WagmiAdapter({
   projectId,
