@@ -165,7 +165,7 @@ contract AMM is ReentrancyGuard, Ownable {
             msg.sender
         );
 
-        emit LiquidityAdded(poolId, msg.sender, liquidity, amount0, amount1);
+        emit LiquidityAdded(poolId, msg.sender, userLiquidity, amount0, amount1);
     }
 
     function addLiquidity(
