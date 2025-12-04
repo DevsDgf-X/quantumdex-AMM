@@ -22,6 +22,7 @@ QuantumDEX consists of two main protocol contracts:
 
 - ✅ Constant Product Market Maker (CPMM) formula
 - ✅ Configurable swap fees (basis points)
+- ✅ Minimum liquidity lock to prevent pool drainage attacks
 - ✅ Reentrancy protection
 - ✅ Comprehensive test coverage
 - ✅ Gas-optimized storage layout
