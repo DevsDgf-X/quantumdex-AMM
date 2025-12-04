@@ -111,6 +111,15 @@ contract AMM is ReentrancyGuard, Ownable {
         poolId = keccak256(abi.encodePacked(token0, token1, feeBps));
     }
 
+    /// @notice Creates a new liquidity pool for a token pair
+    /// @dev On first liquidity provision, MINIMUM_LIQUIDITY is locked forever to address(0)
+    /// to prevent pool drainage attacks. The user receives liquidity minus MINIMUM_LIQUIDITY.
+    /// @param tokenA First token address
+    /// @param tokenB Second token address
+    /// @param amountA Amount of tokenA to provide
+    /// @param amountB Amount of tokenB to provide
+    /// @return poolId The unique identifier for the pool
+    /// @return liquidity The amount of liquidity tokens minted (excluding locked portion)
     function createPool(
         address tokenA,
         address tokenB,
