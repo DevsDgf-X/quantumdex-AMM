@@ -441,4 +441,33 @@ describe("AMM", async () => {
     assert.equal(expectedTotal, expectedUser + expectedLocked, "Total supply should equal user + locked");
     assert.ok(expectedUser > 0n, "User should receive liquidity");
   });
+
+  it("handles edge case where calculated liquidity equals MINIMUM_LIQUIDITY", async () => {
+    // This test verifies that liquidity must be strictly greater than MINIMUM_LIQUIDITY
+    // If sqrt(x * y) exactly equals 1000, it should still revert
+    const tokenE = await viem.deployContract("MockToken", ["TokenE", "TKE", 18], {
+      account: deployer.account,
+    });
+    const tokenF = await viem.deployContract("MockToken", ["TokenF", "TKF", 18], {
+      account: deployer.account,
+    });
+
+    // Try to create pool with amounts that would give exactly 1000 liquidity
+    // sqrt(1000 * 1000) = 1000, which should fail the > check
+    const amount = 1000n * 10n ** 18n;
+
+    await tokenE.write.approve([amm.address, amount], { account: deployer.account });
+    await tokenF.write.approve([amm.address, amount], { account: deployer.account });
+
+    await assert.rejects(
+      async () => {
+        await amm.write.createPool(
+          [tokenE.address, tokenF.address, amount, amount],
+          { account: deployer.account }
+        );
+      },
+      /insufficient liquidity/,
+      "Should revert when liquidity equals MINIMUM_LIQUIDITY"
+    );
+  });
 });
