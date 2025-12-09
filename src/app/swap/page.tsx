@@ -207,9 +207,101 @@ export default function SwapPage() {
   }, [isConnected, sellAmount, sellToken, buyToken, publicClient, slippage, ROUTER_ADDRESS, AMM_ADDRESS, FACTORY_ADDRESS]);
 
   const handleFlip = () => {
+    const tempToken = sellToken;
+    const tempBalance = sellTokenBalance;
     setSellToken(buyToken);
-    setBuyToken(sellToken);
+    setBuyToken(tempToken);
+    setSellTokenBalance(buyTokenBalance);
+    setBuyTokenBalance(tempBalance);
+    setSellAmount("");
+    setQuote(null);
   };
+
+  const handleApprove = useCallback(async () => {
+    if (!isConnected || !address || !walletClient || !AMM_ADDRESS || !sellToken) return;
+
+    try {
+      setApproving(true);
+      setErrorMessage(null);
+      const signer = await walletClientToSigner(walletClient);
+      if (!signer) throw new Error("Failed to get signer");
+
+      await amm.approveToken(signer, sellToken.address, AMM_ADDRESS);
+      
+      // Refresh allowance
+      if (publicClient) {
+        const provider = publicClientToProvider(publicClient);
+        if (provider) {
+          const newAllowance = await amm.getTokenAllowance(provider, sellToken.address, address, AMM_ADDRESS);
+          setTokenAllowance(newAllowance);
+          setNeedsApproval(false);
+        }
+      }
+    } catch (error: any) {
+      console.error("Approval error:", error);
+      setErrorMessage(error?.message || "Approval failed");
+    } finally {
+      setApproving(false);
+    }
+  }, [isConnected, address, walletClient, AMM_ADDRESS, sellToken, publicClient]);
+
+  const handleSwap = useCallback(async () => {
+    if (!isConnected || !address || !walletClient || !AMM_ADDRESS || !sellAmount || !quote) return;
+
+    try {
+      setSubmitting(true);
+      setTxStatus("pending");
+      setErrorMessage(null);
+      const signer = await walletClientToSigner(walletClient);
+      if (!signer) throw new Error("Failed to get signer");
+
+      const amountIn = parseUnits(sellAmount, sellToken.decimals ?? 18);
+      const minAmountOut = parseUnits(quote.minReceived, buyToken.decimals ?? 18);
+      const slippagePercent = parseFloat(slippage.replace("%", ""));
+
+      const result = await amm.swap(
+        signer,
+        AMM_ADDRESS,
+        sellToken.address,
+        buyToken.address,
+        amountIn,
+        minAmountOut,
+        address, // recipient
+        30, // feeBps - default 0.3%
+      );
+
+      if (result?.receipt) {
+        setTxHash(result.receipt.transactionHash);
+        setTxStatus("success");
+        
+        // Refresh balances after successful swap
+        if (publicClient) {
+          const provider = publicClientToProvider(publicClient);
+          if (provider) {
+            const [newSellBal, newBuyBal] = await Promise.all([
+              amm.getTokenBalance(provider, sellToken.address, address, sellToken.decimals ?? 18),
+              amm.getTokenBalance(provider, buyToken.address, address, buyToken.decimals ?? 18),
+            ]);
+            setSellTokenBalance(newSellBal);
+            setBuyTokenBalance(newBuyBal);
+          }
+        }
+        
+        // Reset form after successful swap
+        setTimeout(() => {
+          setSellAmount("");
+          setQuote(null);
+          setTxStatus("idle");
+        }, 3000);
+      }
+    } catch (error: any) {
+      console.error("Swap error:", error);
+      setTxStatus("error");
+      setErrorMessage(error?.message || "Swap failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }, [isConnected, address, walletClient, AMM_ADDRESS, sellAmount, quote, sellToken, buyToken, slippage, publicClient]);
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-12 px-6 py-14">
