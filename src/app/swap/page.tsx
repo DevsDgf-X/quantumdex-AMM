@@ -348,9 +348,6 @@ export default function SwapPage() {
             <div className="space-y-2 rounded-2xl border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950/50">
               <div className="flex items-center justify-between text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">
                 <span>Sell</span>
-                <button className="rounded-full border border-zinc-200 px-2 py-0.5 text-[11px] font-semibold text-zinc-500 transition hover:border-emerald-400 hover:text-emerald-500 dark:border-zinc-700">
-                  Max
-                </button>
               </div>
               <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
                 <div className="relative flex flex-1 items-center gap-2">
