@@ -1,356 +1,201 @@
-import { Contract, parseUnits, formatUnits, type JsonRpcSigner, type Provider } from "ethers";
+import { Contract, utils, type Provider, type JsonRpcSigner, type ContractTransactionResponse } from "ethers";
+import AMM_ABI from "./abi/AMM.json";
 
-export type Pool = {
+export interface Pool {
+  poolId: string;
   token0: string;
   token1: string;
-  fee: number;
-  pool: string;
-  blockNumber?: number;
-  txHash?: string;
-};
+  reserve0: bigint;
+  reserve1: bigint;
+  feeBps: number;
+}
 
-// Minimal factory ABI: PoolCreated event + createPool function
-const DEFAULT_FACTORY_ABI = [
-  "event PoolCreated(address indexed token0, address indexed token1, uint24 indexed fee, address pool)",
-  "function createPool(address tokenA, address tokenB, uint24 fee) external returns (address)",
-];
+export interface SwapParams {
+  poolId: string;
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: bigint;
+  minAmountOut: bigint;
+  recipient: string;
+  deadline: number;
+}
 
-// Minimal router ABI placeholders — callers may pass a custom ABI for their router
-const DEFAULT_ROUTER_ABI = [
-  "function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut) external returns (uint256)",
-  "function addLiquidity(address pool, address tokenA, address tokenB, uint256 amountA, uint256 amountB) external returns (uint256 shares)",
-  "function removeLiquidity(address pool, uint256 shares) external returns (uint256 amountA, uint256 amountB)",
-  // common router read helpers
-  "function getAmountsOut(uint256 amountIn, address[] calldata path) view returns (uint256[])",
-];
-
-const DEFAULT_FACTORY_ABI_FULL = [
-  ...DEFAULT_FACTORY_ABI,
-  // common factory helpers
-  "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address)",
-  "function getPair(address tokenA, address tokenB) view returns (address)",
-];
+const DEFAULT_AMM_ABI = AMM_ABI;
 
 /**
- * Read all PoolCreated events from a factory contract and return typed pools.
- * - `provider` may be an ethers Provider (read-only) or BrowserProvider from ethers.
- * - `factoryAbi` is optional — a minimal ABI is provided.
+ * Get all pools by querying PoolCreated events
  */
 export async function getAllPools(
-  provider: Provider | any,
-  factoryAddress: string,
-  factoryAbi: any = DEFAULT_FACTORY_ABI,
+  contractAddress: string,
+  provider: Provider
 ): Promise<Pool[]> {
-  const factory = new Contract(factoryAddress, factoryAbi, provider);
-  const filter = factory.filters?.PoolCreated?.();
-  const events = filter ? await factory.queryFilter(filter) : [];
-  return events.map((ev: any) => ({
-    token0: ev.args?.token0 ?? ev.args?.[0],
-    token1: ev.args?.token1 ?? ev.args?.[1],
-    fee: Number(ev.args?.fee ?? ev.args?.[2] ?? 0),
-    pool: ev.args?.pool ?? ev.args?.[3],
-    blockNumber: ev.blockNumber,
-    txHash: ev.transactionHash,
-  }));
+  try {
+    const amm = new Contract(contractAddress, DEFAULT_AMM_ABI, provider);
+    const filter = amm.filters.PoolCreated();
+    const events = await amm.queryFilter(filter);
+
+    return Promise.all(
+      events.map(async (event) => {
+        if (!event.args) throw new Error("Event args missing");
+        const { poolId, token0, token1, feeBps } = event.args;
+        
+        // Get pool reserves
+        const pool = await amm.getPool(poolId);
+        
+        return {
+          poolId: poolId.toString(),
+          token0,
+          token1,
+          reserve0: pool.reserve0,
+          reserve1: pool.reserve1,
+          feeBps: Number(feeBps)
+        };
+      })
+    );
+  } catch (error) {
+    console.error("Error getting all pools:", error);
+    throw error;
+  }
 }
 
 /**
- * Try to compute an on-chain quote for tokenIn -> tokenOut for a given amountIn.
- * It will try common router methods (getAmountsOut) and fallback to reading pair reserves.
- * Returns amountOut as a string in base units (wei) or null if unable to quote.
+ * Get pool data by poolId
  */
-async function resolveAbi(maybeAbi: any, importPath: string, fallback: any) {
-  if (maybeAbi) return maybeAbi;
+export async function getPool(
+  poolId: string,
+  contractAddress: string,
+  provider: Provider
+): Promise<Pool | null> {
   try {
-    // dynamic import allows dropping ABI json into src/abis/Router.json etc.
-    // path is relative to the compiled module location; using explicit path for Next.js
-    // may require adjustment depending on bundler. We try a few likely locations.
-    const mod = await import(importPath);
-    return (mod && (mod.default ?? mod)) || fallback;
-  } catch (e) {
-    return fallback;
-  }
-}
-
-export async function getQuote(
-  provider: Provider | any,
-  routerAddress: string,
-  tokenIn: string,
-  tokenOut: string,
-  amountInHuman: string,
-  decimalsIn = 18,
-  decimalsOut = 18,
-  routerAbi?: any,
-  factoryAddress?: string,
-  factoryAbi?: any,
-) {
-  const resolvedRouterAbi = await resolveAbi(routerAbi, "@/abis/Router.json", DEFAULT_ROUTER_ABI);
-  const resolvedFactoryAbi = await resolveAbi(factoryAbi, "@/abis/Factory.json", DEFAULT_FACTORY_ABI_FULL);
-  const router = new Contract(routerAddress, resolvedRouterAbi, provider);
-  // convert to wei-like amount
-  const amountIn = parseUnits(amountInHuman, decimalsIn);
-  // try getAmountsOut(path)
-  try {
-    if (typeof router.getAmountsOut === "function") {
-      const amounts: any = await router.getAmountsOut(amountIn, [tokenIn, tokenOut]);
-      const out = amounts[amounts.length - 1];
-      return out.toString();
+    const amm = new Contract(contractAddress, DEFAULT_AMM_ABI, provider);
+    const pool = await amm.getPool(poolId);
+    
+    if (!pool || pool.token0 === "0x0000000000000000000000000000000000000000") {
+      return null;
     }
-  } catch (e) {
-    // ignore and try next
-  }
 
-  // fallback: try factory -> pair -> getReserves
-  if (factoryAddress) {
-    try {
-      const factory = new Contract(factoryAddress, resolvedFactoryAbi, provider);
-      // try common function names
-      let pairAddress: string | null = null;
-      try {
-        pairAddress = await factory.getPair(tokenIn, tokenOut);
-      } catch {}
-      if (!pairAddress) {
-        try {
-          pairAddress = await factory.getPool(tokenIn, tokenOut, 3000);
-        } catch {}
-      }
-      if (pairAddress && pairAddress !== "0x0000000000000000000000000000000000000000") {
-        const pairAbi = ["function getReserves() view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)", "function token0() view returns (address)"];
-        const pair = new Contract(pairAddress, pairAbi, provider);
-        const token0 = await pair.token0();
-        const reserves: any = await pair.getReserves();
-        let reserveIn, reserveOut;
-        if (token0.toLowerCase() === tokenIn.toLowerCase()) {
-          reserveIn = reserves[0];
-          reserveOut = reserves[1];
-        } else {
-          reserveIn = reserves[1];
-          reserveOut = reserves[0];
-        }
-        // price formula for UniswapV2: amountOut = amountIn * reserveOut / reserveIn (ignoring fees)
-        const amountOut = (amountIn * reserveOut) / reserveIn;
-        return amountOut.toString();
-      }
-    } catch (e) {
-      // ignore
-    }
+    return {
+      poolId,
+      token0: pool.token0,
+      token1: pool.token1,
+      reserve0: pool.reserve0,
+      reserve1: pool.reserve1,
+      feeBps: Number(pool.feeBps)
+    };
+  } catch (error) {
+    console.error(`Error getting pool ${poolId}:`, error);
+    throw error;
   }
-
-  return null;
 }
 
 /**
- * Create a pool using a factory contract. Returns the transaction receipt (wait result).
- * - `signer` must be an ethers Signer (JsonRpcSigner) connected to a wallet.
- * - `factoryAbi` can be supplied if the factory uses different function signatures.
+ * Create a new pool
  */
 export async function createPool(
-  signer: JsonRpcSigner,
-  factoryAddress: string,
   tokenA: string,
   tokenB: string,
-  fee: number,
-  factoryAbi?: any,
-) {
-  const resolvedFactoryAbi = await resolveAbi(factoryAbi, "@/abis/Factory.json", DEFAULT_FACTORY_ABI);
-  const factory = new Contract(factoryAddress, resolvedFactoryAbi, signer);
-  const tx = await factory.createPool(tokenA, tokenB, fee);
-  return tx.wait?.();
+  amountA: bigint,
+  amountB: bigint,
+  contractAddress: string,
+  signer: JsonRpcSigner
+): Promise<ContractTransactionResponse> {
+  try {
+    const amm = new Contract(contractAddress, DEFAULT_AMM_ABI, signer);
+    const tx = await amm.createPool(tokenA, tokenB, amountA, amountB);
+    return tx;
+  } catch (error) {
+    console.error("Error creating pool:", error);
+    throw error;
+  }
 }
 
 /**
- * Add liquidity via a router/manager contract. Returns transaction receipt.
- * - `routerAbi` defaults to a minimal shape; pass a real ABI for your router.
+ * Add liquidity to a pool
  */
 export async function addLiquidity(
-  signer: JsonRpcSigner,
-  routerAddress: string,
-  poolAddress: string,
-  tokenA: string,
-  tokenB: string,
-  amountA: string | number,
-  amountB: string | number,
-  routerAbi?: any,
-) {
-  const resolvedRouterAbi = await resolveAbi(routerAbi, "@/abis/Router.json", DEFAULT_ROUTER_ABI);
-  const router = new Contract(routerAddress, resolvedRouterAbi, signer);
-  const tx = await router.addLiquidity(poolAddress, tokenA, tokenB, amountA, amountB);
-  return tx.wait?.();
+  poolId: string,
+  amount0: bigint,
+  amount1: bigint,
+  contractAddress: string,
+  signer: JsonRpcSigner
+): Promise<ContractTransactionResponse> {
+  try {
+    const amm = new Contract(contractAddress, DEFAULT_AMM_ABI, signer);
+    const tx = await amm.addLiquidity(poolId, amount0, amount1);
+    return tx;
+  } catch (error) {
+    console.error("Error adding liquidity:", error);
+    throw error;
+  }
 }
 
 /**
- * Remove liquidity from a pool (by shares). Returns transaction receipt and amounts.
+ * Remove liquidity from a pool
  */
 export async function removeLiquidity(
-  signer: JsonRpcSigner,
-  routerAddress: string,
-  poolAddress: string,
-  shares: string | number,
-  routerAbi?: any,
-) {
-  const resolvedRouterAbi = await resolveAbi(routerAbi, "@/abis/Router.json", DEFAULT_ROUTER_ABI);
-  const router = new Contract(routerAddress, resolvedRouterAbi, signer);
-  const tx = await router.removeLiquidity(poolAddress, shares);
-  return tx.wait?.();
+  poolId: string,
+  liquidity: bigint,
+  contractAddress: string,
+  signer: JsonRpcSigner
+): Promise<ContractTransactionResponse> {
+  try {
+    const amm = new Contract(contractAddress, DEFAULT_AMM_ABI, signer);
+    const tx = await amm.removeLiquidity(poolId, liquidity);
+    return tx;
+  } catch (error) {
+    console.error("Error removing liquidity:", error);
+    throw error;
+  }
 }
 
 /**
- * Execute a swap via the AMM contract. Returns transaction receipt and amountOut.
- * - Uses the actual AMM contract ABI with poolId-based swaps
- * - Automatically fetches poolId using getPoolId
+ * Execute a swap
  */
 export async function swap(
-  signer: JsonRpcSigner,
-  ammAddress: string,
+  poolId: string,
   tokenIn: string,
-  tokenOut: string,
-  amountIn: string | number,
-  minAmountOut: string | number,
+  amountIn: bigint,
+  minAmountOut: bigint,
   recipient: string,
-  feeBps: number = 30, // Default 0.3% fee (30 basis points)
-  ammAbi?: any,
-) {
-  const resolvedAmmAbi = await resolveAbi(ammAbi, "@/lib/abi/AMM.json", null);
-  if (!resolvedAmmAbi) {
-    throw new Error("AMM ABI not found. Please provide ammAbi or ensure @/lib/abi/AMM.json exists");
+  contractAddress: string,
+  signer: JsonRpcSigner
+): Promise<ContractTransactionResponse> {
+  try {
+    const amm = new Contract(contractAddress, DEFAULT_AMM_ABI, signer);
+    const tx = await amm.swap(poolId, tokenIn, amountIn, minAmountOut, recipient);
+    return tx;
+  } catch (error) {
+    console.error("Error executing swap:", error);
+    throw error;
   }
-  const amm = new Contract(ammAddress, resolvedAmmAbi, signer);
-  
-  // Get poolId for the token pair
-  const poolId = await amm.getPoolId(tokenIn, tokenOut, feeBps);
-  
-  // Execute swap
-  const tx = await amm.swap(poolId, tokenIn, amountIn, minAmountOut, recipient);
-  const receipt = await tx.wait?.();
-  return { receipt, amountOut: receipt?.logs ? "0" : "0" }; // amountOut would be parsed from events
 }
 
 /**
- * Query a pool or position manager for a user's liquidity. This is intentionally
- * permissive: it will try a few common methods (`balanceOf`, `liquidityOf`, `positions`).
+ * Get user's liquidity in a pool
  */
 export async function getUserLiquidity(
-  provider: Provider | any,
+  poolId: string,
   userAddress: string,
-  poolAddress: string,
-  poolAbi: any = [
-    "function balanceOf(address owner) view returns (uint256)",
-    "function liquidityOf(address owner) view returns (uint256)",
-  ],
-) {
-  const pool = new Contract(poolAddress, poolAbi, provider);
-  // try balanceOf
+  contractAddress: string,
+  provider: Provider
+): Promise<bigint> {
   try {
-    const bal = await pool.balanceOf(userAddress);
-    return { type: "balanceOf", amount: bal.toString() } as const;
-  } catch (e) {
-    // ignore and try next
-  }
-  try {
-    const liq = await pool.liquidityOf(userAddress);
-    return { type: "liquidityOf", amount: liq.toString() } as const;
-  } catch (e) {
-    // ignore
-  }
-  return { type: "unknown", amount: "0" } as const;
-}
-
-/**
- * Get token balance for a user address.
- * Supports both ERC20 tokens and native ETH.
- */
-export async function getTokenBalance(
-  provider: Provider | any,
-  tokenAddress: string,
-  userAddress: string,
-  decimals: number = 18,
-): Promise<string> {
-  // Native ETH balance
-  if (tokenAddress === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" || !tokenAddress) {
-    const balance = await provider.getBalance(userAddress);
-    return formatUnits(balance, decimals);
-  }
-
-  // ERC20 token balance
-  const tokenAbi = [
-    "function balanceOf(address owner) view returns (uint256)",
-    "function decimals() view returns (uint8)",
-  ];
-  try {
-    const token = new Contract(tokenAddress, tokenAbi, provider);
-    const balance = await token.balanceOf(userAddress);
-    // Try to get actual decimals from contract
-    let actualDecimals = decimals;
-    try {
-      actualDecimals = await token.decimals();
-    } catch {
-      // Use provided decimals if contract doesn't have decimals()
-    }
-    return formatUnits(balance, actualDecimals);
+    const amm = new Contract(contractAddress, DEFAULT_AMM_ABI, provider);
+    const balance = await amm.getLpBalance(poolId, userAddress);
+    return balance;
   } catch (error) {
-    console.error("Error fetching token balance:", error);
-    return "0";
+    console.error("Error getting user liquidity:", error);
+    throw error;
   }
 }
 
-/**
- * Get token allowance for a spender (e.g., router/AMM contract).
- */
-export async function getTokenAllowance(
-  provider: Provider | any,
-  tokenAddress: string,
-  ownerAddress: string,
-  spenderAddress: string,
-): Promise<string> {
-  // Native ETH doesn't need allowance
-  if (tokenAddress === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" || !tokenAddress) {
-    return "0"; // Native ETH doesn't require approval
-  }
-
-  const tokenAbi = ["function allowance(address owner, address spender) view returns (uint256)"];
-  try {
-    const token = new Contract(tokenAddress, tokenAbi, provider);
-    const allowance = await token.allowance(ownerAddress, spenderAddress);
-    return allowance.toString();
-  } catch (error) {
-    console.error("Error fetching token allowance:", error);
-    return "0";
-  }
-}
-
-/**
- * Approve token spending for a spender (e.g., AMM contract).
- * Returns transaction receipt.
- */
-export async function approveToken(
-  signer: JsonRpcSigner,
-  tokenAddress: string,
-  spenderAddress: string,
-  amount: string | number = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", // Max uint256
-  tokenAbi?: any,
-) {
-  // Native ETH doesn't need approval
-  if (tokenAddress === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" || !tokenAddress) {
-    return null; // No approval needed for native ETH
-  }
-
-  const resolvedTokenAbi = await resolveAbi(tokenAbi, "@/lib/abi/MockToken.json", [
-    "function approve(address spender, uint256 amount) returns (bool)",
-  ]);
-  const token = new Contract(tokenAddress, resolvedTokenAbi, signer);
-  const tx = await token.approve(spenderAddress, amount);
-  return tx.wait?.();
-}
-
+// Export all functions as default object
 export default {
   getAllPools,
-  getQuote,
+  getPool,
   createPool,
   addLiquidity,
   removeLiquidity,
   swap,
   getUserLiquidity,
-  getTokenBalance,
-  getTokenAllowance,
-  approveToken,
 };
