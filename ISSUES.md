@@ -218,42 +218,43 @@ Port `src/app/swap/page.tsx` to use the new contract helpers and wallet signer t
 
 ---
 
-## ❌ Pending Issues
-
-
-
 ### Issue #8: Pools List & Pool Details Component — Contract Integration
-**Status:** ❌ PENDING  
-**Labels:** `frontend`, `feature`, `pools`  
+**Status:** ✅ COMPLETED  
+**Labels:** `frontend`, `feature`, `pools`, `completed`  
 **Priority:** HIGH  
 **Depends on:** #6
 
 **Description:**
-Build UI to list pools by reading events or contract state; show pool details and balances. The UI exists but displays mock data.
-
-**Current State:**
-- Pools list page exists at `/pools`
-- Pool details page exists at `/pools/[poolId]`
-- Uses `getAllPools` and `getPool` functions (need implementation)
-- Displays mock data
+Build UI to list pools by reading events or contract state; show pool details and balances.
 
 **Acceptance Criteria:**
-- [ ] Pools list page reads all pools from AMM contract events
-- [ ] Each pool shows: token pair, fee tier, TVL, reserves
-- [ ] Pool details page shows: full pool info, reserves, user's LP balance
-- [ ] Real-time data updates when pools change
-- [ ] Loading states handled
-- [ ] Error states handled
-- [ ] Links to pool detail pages work
+- [x] Pools list page reads all pools from AMM contract events
+- [x] Each pool shows: token pair, fee tier, TVL, reserves
+- [x] Pool details page shows: full pool info, reserves, user's LP balance
+- [x] Real-time data updates when pools change
+- [x] Loading states handled
+- [x] Error states handled
+- [x] Links to pool detail pages work
 
-**Technical Notes:**
-- Read `PoolCreated` events from AMM contract
-- For each pool, call `getPool(bytes32 poolId)` to get current state
-- Display reserves, fee, total liquidity
-- Calculate TVL (if token prices available)
-- **Contract Address:** Use `NEXT_PUBLIC_AMM_CONTRACT_ADDRESS` environment variable. Contract will be deployed and address provided.
+**Implementation Notes:**
+- Pools list page at `/pools` fully integrated with AMM contract
+- Fetches pools from `PoolCreated` events via `getAllPools()`
+- Displays token pairs, fee tiers, TVL, and reserves
+- Pool details page at `/pools/[poolId]` shows complete pool information
+- User LP balance fetched via `getUserLiquidity()`
+- Real-time updates via `useEffect` with proper dependencies
+- Comprehensive loading and error state handling
+- Network and fee tier filtering implemented
+- Added `PoolInfo`, `PoolCreatedEvent` types and `AMM_CONTRACT_ADDRESS` export
+- Added `totalSupply` field to Pool interface for LP calculations
+- Bonus: Add/Remove liquidity functionality also implemented (overlaps with Issue #9)
+- Commit: `ba5b13f` - "feat(pools): add missing type definitions and exports to AMM library"
 
 ---
+
+## ❌ Pending Issues
+
+
 
 ### Issue #9: Add / Remove Liquidity Components — Contract Integration
 **Status:** ❌ PENDING  
