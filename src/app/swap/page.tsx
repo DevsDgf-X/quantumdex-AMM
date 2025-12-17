@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
-import { useAccount, useChainId } from "wagmi";
+import { useAccount, useChainId, usePublicClient, useWalletClient } from "wagmi";
 
 import { networks } from "@/config/wagmi";
 import { shortenAddress } from "@/lib/utils";
