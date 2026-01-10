@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAccount, usePublicClient, useWalletClient } from "wagmi";
@@ -15,8 +15,7 @@ import {
   getTokenDecimals,
   sortTokenAddresses,
 } from "@/lib/amm";
-import { walletClientToSigner } from "@/config/adapter";
-import { publicClientToProvider } from "@/config/adapter";
+import { publicClientToProvider, walletClientToSigner } from "@/config/adapter";
 
 const launchChecklist = [
   "Token contracts verified and decimals confirmed",
