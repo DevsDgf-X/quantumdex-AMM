@@ -1,4 +1,12 @@
-import { Contract, type Provider, type JsonRpcSigner, type ContractTransactionResponse, formatUnits } from "ethers";
+import {
+  Contract,
+  type Provider,
+  type JsonRpcSigner,
+  type ContractTransactionResponse,
+  formatUnits,
+  isAddress,
+  getAddress,
+} from "ethers";
 import AMM_ABI from "./abi/AMM.json";
 
 // Minimal ERC20 ABI for basic token interactions
@@ -37,6 +45,38 @@ export interface PoolCreatedEvent {
 }
 
 const DEFAULT_AMM_ABI = AMM_ABI;
+
+export function normalizeAddress(address: string): string {
+  const trimmed = address.trim();
+  if (!isAddress(trimmed)) {
+    throw new Error(`Invalid address: ${address}`);
+  }
+  return getAddress(trimmed);
+}
+
+export function sortTokenAddresses(tokenA: string, tokenB: string): { token0: string; token1: string } {
+  const a = normalizeAddress(tokenA);
+  const b = normalizeAddress(tokenB);
+  if (a.toLowerCase() === b.toLowerCase()) {
+    throw new Error("Token addresses must be different");
+  }
+
+  // Deterministic ordering: token0 < token1 by numeric address.
+  return BigInt(a) < BigInt(b) ? { token0: a, token1: b } : { token0: b, token1: a };
+}
+
+export async function getDefaultFeeBps(contractAddress: string, provider: Provider): Promise<number> {
+  const amm = new Contract(contractAddress, DEFAULT_AMM_ABI, provider);
+  const fee = await amm.defaultFeeBps();
+  return Number(fee);
+}
+
+export async function getTokenDecimals(provider: Provider, tokenAddress: string): Promise<number> {
+  if (tokenAddress === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE") return 18;
+  const token = new Contract(tokenAddress, ERC20_ABI, provider);
+  const decimals = await token.decimals();
+  return Number(decimals);
+}
 
 /**
  * Get all pools by querying PoolCreated events
@@ -372,6 +412,10 @@ export async function getUserLiquidity(
 
 // Export all functions as default object
 export default {
+  normalizeAddress,
+  sortTokenAddresses,
+  getDefaultFeeBps,
+  getTokenDecimals,
   getAllPools,
   getPool,
   getPoolId,
