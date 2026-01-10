@@ -3,6 +3,7 @@
 import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import { useAccount, useChainId, usePublicClient, useWalletClient } from "wagmi";
+import { parseUnits, formatUnits } from "ethers";
 
 import { networks } from "@/config/wagmi";
 import { shortenAddress } from "@/lib/utils";
@@ -11,6 +12,9 @@ import {
   getUserLiquidity, 
   addLiquidity, 
   removeLiquidity,
+  getTokenBalance,
+  getTokenAllowance,
+  approveToken,
   AMM_CONTRACT_ADDRESS,
   type PoolInfo 
 } from "@/lib/amm";
@@ -27,6 +31,13 @@ export default function PoolDetailsPage({ params }: { params: Promise<{ poolId: 
   const [liquidityToRemove, setLiquidityToRemove] = useState("");
   const [poolInfo, setPoolInfo] = useState<PoolInfo | null>(null);
   const [userLpBalance, setUserLpBalance] = useState<bigint>(BigInt(0));
+  const [token0Balance, setToken0Balance] = useState<string>("0");
+  const [token1Balance, setToken1Balance] = useState<string>("0");
+  const [token0Allowance, setToken0Allowance] = useState<string>("0");
+  const [token1Allowance, setToken1Allowance] = useState<string>("0");
+  const [token0NeedsApproval, setToken0NeedsApproval] = useState(false);
+  const [token1NeedsApproval, setToken1NeedsApproval] = useState(false);
+  const [approving, setApproving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [txLoading, setTxLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,8 +72,14 @@ export default function PoolDetailsPage({ params }: { params: Promise<{ poolId: 
         setPoolInfo(pool);
 
         if (address && pool) {
-          const balance = await getUserLiquidity(poolId, address, AMM_CONTRACT_ADDRESS, provider);
+          const [balance, token0Bal, token1Bal] = await Promise.all([
+            getUserLiquidity(poolId, address, AMM_CONTRACT_ADDRESS, provider),
+            getTokenBalance(provider, pool.token0, address, 18),
+            getTokenBalance(provider, pool.token1, address, 18),
+          ]);
           setUserLpBalance(balance);
+          setToken0Balance(token0Bal);
+          setToken1Balance(token1Bal);
         }
       } catch (err) {
         console.error("Error fetching pool:", err);
@@ -74,6 +91,129 @@ export default function PoolDetailsPage({ params }: { params: Promise<{ poolId: 
 
     fetchPoolData();
   }, [publicClient, poolId, address]);
+
+  // Fetch token allowances
+  useEffect(() => {
+    if (!isConnected || !address || !publicClient || !poolInfo || !AMM_CONTRACT_ADDRESS) {
+      setToken0Allowance("0");
+      setToken1Allowance("0");
+      setToken0NeedsApproval(false);
+      setToken1NeedsApproval(false);
+      return;
+    }
+
+    const provider = publicClientToProvider(publicClient);
+    if (!provider) return;
+
+    let mounted = true;
+    (async () => {
+      try {
+        const [allowance0, allowance1] = await Promise.all([
+          getTokenAllowance(provider, poolInfo.token0, address, AMM_CONTRACT_ADDRESS),
+          getTokenAllowance(provider, poolInfo.token1, address, AMM_CONTRACT_ADDRESS),
+        ]);
+        
+        if (mounted) {
+          setToken0Allowance(allowance0);
+          setToken1Allowance(allowance1);
+          
+          // Check if approvals are needed based on current input amounts
+          if (token0Amount && token1Amount) {
+            try {
+              const amount0BigInt = parseUnits(token0Amount, 18);
+              const amount1BigInt = parseUnits(token1Amount, 18);
+              setToken0NeedsApproval(BigInt(allowance0) < amount0BigInt);
+              setToken1NeedsApproval(BigInt(allowance1) < amount1BigInt);
+            } catch {
+              setToken0NeedsApproval(false);
+              setToken1NeedsApproval(false);
+            }
+          } else {
+            setToken0NeedsApproval(false);
+            setToken1NeedsApproval(false);
+          }
+        }
+      } catch (error) {
+        console.error("Error checking allowances:", error);
+      }
+    })();
+    
+    return () => {
+      mounted = false;
+    };
+  }, [isConnected, address, publicClient, poolInfo, token0Amount, token1Amount]);
+
+  const handleApproveToken = async (tokenAddress: string, tokenSymbol: string) => {
+    if (!isConnected || !walletClient || !address || !poolInfo || !AMM_CONTRACT_ADDRESS) {
+      setError("Please connect your wallet");
+      return;
+    }
+
+    try {
+      setApproving(true);
+      setError(null);
+      setSuccess(null);
+
+      const signer = await walletClientToSigner(walletClient);
+      if (!signer) {
+        throw new Error("Failed to get signer");
+      }
+
+      await approveToken(signer, tokenAddress, AMM_CONTRACT_ADDRESS);
+      
+      setSuccess(`${tokenSymbol} approved successfully!`);
+      
+      // Refresh allowances
+      if (publicClient && poolInfo) {
+        const provider = publicClientToProvider(publicClient);
+        if (provider) {
+          const [newAllowance0, newAllowance1] = await Promise.all([
+            getTokenAllowance(provider, poolInfo.token0, address, AMM_CONTRACT_ADDRESS),
+            getTokenAllowance(provider, poolInfo.token1, address, AMM_CONTRACT_ADDRESS),
+          ]);
+          setToken0Allowance(newAllowance0);
+          setToken1Allowance(newAllowance1);
+          setToken0NeedsApproval(false);
+          setToken1NeedsApproval(false);
+        }
+      }
+    } catch (err) {
+      console.error("Error approving token:", err);
+      setError(err instanceof Error ? err.message : "Failed to approve token");
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  // Calculate ratio validation warning
+  const ratioWarning = useMemo(() => {
+    if (!poolInfo || !token0Amount || !token1Amount || poolInfo.totalSupply === BigInt(0)) {
+      return null; // New pool or no amounts entered
+    }
+
+    try {
+      const amount0 = parseFloat(token0Amount);
+      const amount1 = parseFloat(token1Amount);
+      
+      if (isNaN(amount0) || isNaN(amount1) || amount0 <= 0 || amount1 <= 0) {
+        return null;
+      }
+
+      const poolRatio = Number(poolInfo.reserve1) / Number(poolInfo.reserve0);
+      const inputRatio = amount1 / amount0;
+      
+      // Allow 0.5% deviation for ratio matching
+      const deviation = Math.abs(inputRatio - poolRatio) / poolRatio;
+      if (deviation > 0.005) {
+        const expectedAmount1 = (amount0 * poolRatio).toFixed(6);
+        return `Ratio mismatch! Expected ~${expectedAmount1} token1 for ${token0Amount} token0 (pool ratio: ${poolRatio.toFixed(6)})`;
+      }
+    } catch {
+      return null;
+    }
+    
+    return null;
+  }, [poolInfo, token0Amount, token1Amount]);
 
   const handleAddLiquidity = async () => {
     if (!isConnected || !walletClient || !address || !poolInfo || !AMM_CONTRACT_ADDRESS) {
@@ -97,8 +237,38 @@ export default function PoolDetailsPage({ params }: { params: Promise<{ poolId: 
       }
 
       // Convert amounts to BigInt (assuming 18 decimals)
-      const amount0BigInt = BigInt(Math.floor(parseFloat(token0Amount) * 1e18));
-      const amount1BigInt = BigInt(Math.floor(parseFloat(token1Amount) * 1e18));
+      const amount0BigInt = parseUnits(token0Amount, 18);
+      const amount1BigInt = parseUnits(token1Amount, 18);
+
+      // Check balances
+      const balance0BigInt = parseUnits(token0Balance, 18);
+      const balance1BigInt = parseUnits(token1Balance, 18);
+      
+      if (amount0BigInt > balance0BigInt) {
+        throw new Error("Insufficient token0 balance");
+      }
+      if (amount1BigInt > balance1BigInt) {
+        throw new Error("Insufficient token1 balance");
+      }
+
+      // Check and approve tokens if needed
+      if (amount0BigInt > BigInt(token0Allowance)) {
+        throw new Error("Please approve token0 first");
+      }
+      if (amount1BigInt > BigInt(token1Allowance)) {
+        throw new Error("Please approve token1 first");
+      }
+
+      // Validate ratio for existing pools (allow 1% deviation)
+      if (poolInfo.totalSupply > BigInt(0)) {
+        const poolRatio = Number(poolInfo.reserve1) / Number(poolInfo.reserve0);
+        const inputRatio = Number(amount1BigInt) / Number(amount0BigInt);
+        const deviation = Math.abs(inputRatio - poolRatio) / poolRatio;
+        
+        if (deviation > 0.01) {
+          throw new Error(`Ratio mismatch! Amounts must match pool ratio (${poolRatio.toFixed(6)}) within 1% tolerance`);
+        }
+      }
 
       const result = await addLiquidity(
         poolId,
@@ -108,7 +278,7 @@ export default function PoolDetailsPage({ params }: { params: Promise<{ poolId: 
         signer
       );
 
-await result.wait(); // Wait for transaction confirmation
+      await result.wait(); // Wait for transaction confirmation
       
       setSuccess(`Liquidity added successfully! Transaction: ${result.hash}`);
       
@@ -119,11 +289,17 @@ await result.wait(); // Wait for transaction confirmation
       // Refresh pool data
       if (publicClient) {
         const provider = publicClientToProvider(publicClient);
-        if (provider) {
-          const pool = await getPool(poolId, AMM_CONTRACT_ADDRESS, provider);
+        if (provider && poolInfo) {
+          const [pool, balance, token0Bal, token1Bal] = await Promise.all([
+            getPool(poolId, AMM_CONTRACT_ADDRESS, provider),
+            getUserLiquidity(poolId, address, AMM_CONTRACT_ADDRESS, provider),
+            getTokenBalance(provider, poolInfo.token0, address, 18),
+            getTokenBalance(provider, poolInfo.token1, address, 18),
+          ]);
           setPoolInfo(pool);
-          const balance = await getUserLiquidity(poolId, address, AMM_CONTRACT_ADDRESS, provider);
           setUserLpBalance(balance);
+          setToken0Balance(token0Bal);
+          setToken1Balance(token1Bal);
         }
       }
     } catch (err) {
@@ -177,13 +353,19 @@ await result.wait(); // Wait for transaction confirmation
       setLiquidityToRemove("");
       
       // Refresh pool data
-      if (publicClient) {
+      if (publicClient && poolInfo) {
         const provider = publicClientToProvider(publicClient);
         if (provider) {
-          const pool = await getPool(poolId, AMM_CONTRACT_ADDRESS, provider);
+          const [pool, balance, token0Bal, token1Bal] = await Promise.all([
+            getPool(poolId, AMM_CONTRACT_ADDRESS, provider),
+            getUserLiquidity(poolId, address, AMM_CONTRACT_ADDRESS, provider),
+            getTokenBalance(provider, poolInfo.token0, address, 18),
+            getTokenBalance(provider, poolInfo.token1, address, 18),
+          ]);
           setPoolInfo(pool);
-          const balance = await getUserLiquidity(poolId, address, AMM_CONTRACT_ADDRESS, provider);
           setUserLpBalance(balance);
+          setToken0Balance(token0Bal);
+          setToken1Balance(token1Bal);
         }
       }
     } catch (err) {
@@ -348,7 +530,24 @@ await result.wait(); // Wait for transaction confirmation
                   <div className="space-y-2 rounded-2xl border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950/50">
                     <div className="flex items-center justify-between text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">
                       <span>Token 0</span>
-                      <button className="rounded-full border border-zinc-200 px-2 py-0.5 text-[11px] font-semibold text-zinc-500 transition hover:border-emerald-400 hover:text-emerald-500 dark:border-zinc-700">
+                      <button
+                        onClick={() => {
+                          if (isConnected && token0Balance) {
+                            setToken0Amount(token0Balance);
+                            // Auto-calculate token1 amount based on pool ratio
+                            if (poolInfo && poolInfo.reserve0 > 0 && poolInfo.reserve1 > 0) {
+                              const ratio = Number(poolInfo.reserve1) / Number(poolInfo.reserve0);
+                              const calculatedAmount1 = (parseFloat(token0Balance) * ratio).toFixed(6);
+                              // Only auto-set if calculated amount is within user's balance
+                              if (parseFloat(calculatedAmount1) <= parseFloat(token1Balance)) {
+                                setToken1Amount(calculatedAmount1);
+                              }
+                            }
+                          }
+                        }}
+                        disabled={!isConnected || !token0Balance}
+                        className="rounded-full border border-zinc-200 px-2 py-0.5 text-[11px] font-semibold text-zinc-500 transition hover:border-emerald-400 hover:text-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-700"
+                      >
                         Max
                       </button>
                     </div>
@@ -358,12 +557,30 @@ await result.wait(); // Wait for transaction confirmation
                         placeholder={isConnected ? "0.0" : "Connect wallet"}
                         disabled={!isConnected}
                         value={token0Amount}
-                        onChange={(e) => setToken0Amount(e.target.value)}
+                        onChange={(e) => {
+                          setToken0Amount(e.target.value);
+                          // Auto-calculate token1 amount based on pool ratio for existing pools
+                          if (poolInfo && poolInfo.reserve0 > 0 && poolInfo.reserve1 > 0 && e.target.value) {
+                            try {
+                              const amount0 = parseFloat(e.target.value);
+                              if (!isNaN(amount0) && amount0 > 0) {
+                                const ratio = Number(poolInfo.reserve1) / Number(poolInfo.reserve0);
+                                const calculatedAmount1 = (amount0 * ratio).toFixed(6);
+                                // Only auto-set if calculated amount is within user's balance
+                                if (parseFloat(calculatedAmount1) <= parseFloat(token1Balance) || !token1Balance || parseFloat(token1Balance) === 0) {
+                                  setToken1Amount(calculatedAmount1);
+                                }
+                              }
+                            } catch {
+                              // Ignore invalid input
+                            }
+                          }
+                        }}
                         className="flex-1 rounded-2xl border border-transparent bg-transparent text-right text-2xl font-semibold tracking-tight text-zinc-900 outline-none placeholder:text-zinc-300 dark:text-zinc-100"
                       />
                     </div>
                     <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
-                      <span>Balance: —</span>
+                      <span>Balance: {isConnected ? `${token0Balance}` : "—"}</span>
                       <span>Reserve: {poolInfo ? (Number(poolInfo.reserve0) / 1e18).toFixed(4) : "—"}</span>
                     </div>
                   </div>
@@ -376,17 +593,41 @@ await result.wait(); // Wait for transaction confirmation
                         placeholder={isConnected ? "0.0" : "Connect wallet"}
                         disabled={!isConnected}
                         value={token1Amount}
-                        onChange={(e) => setToken1Amount(e.target.value)}
+                        onChange={(e) => {
+                          setToken1Amount(e.target.value);
+                          // Auto-calculate token0 amount based on pool ratio for existing pools
+                          if (poolInfo && poolInfo.reserve0 > 0 && poolInfo.reserve1 > 0 && e.target.value) {
+                            try {
+                              const amount1 = parseFloat(e.target.value);
+                              if (!isNaN(amount1) && amount1 > 0) {
+                                const ratio = Number(poolInfo.reserve0) / Number(poolInfo.reserve1);
+                                const calculatedAmount0 = (amount1 * ratio).toFixed(6);
+                                // Only auto-set if calculated amount is within user's balance
+                                if (parseFloat(calculatedAmount0) <= parseFloat(token0Balance) || !token0Balance || parseFloat(token0Balance) === 0) {
+                                  setToken0Amount(calculatedAmount0);
+                                }
+                              }
+                            } catch {
+                              // Ignore invalid input
+                            }
+                          }
+                        }}
                         className="flex-1 rounded-2xl border border-transparent bg-transparent text-right text-2xl font-semibold tracking-tight text-zinc-900 outline-none placeholder:text-zinc-300 dark:text-zinc-100"
                       />
                     </div>
                     <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
-                      <span>Balance: —</span>
+                      <span>Balance: {isConnected ? `${token1Balance}` : "—"}</span>
                       <span>Reserve: {poolInfo ? (Number(poolInfo.reserve1) / 1e18).toFixed(4) : "—"}</span>
                     </div>
                   </div>
                 </div>
               </div>
+
+              {ratioWarning && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+                  {ratioWarning}
+                </div>
+              )}
 
               {error && (
                 <div className="rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-sm text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200">
@@ -417,13 +658,33 @@ await result.wait(); // Wait for transaction confirmation
                 </div>
               </div>
 
-              <button
-                onClick={handleAddLiquidity}
-                className="w-full rounded-2xl bg-emerald-500 py-4 text-base font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:bg-emerald-600 disabled:bg-zinc-300 disabled:text-zinc-500"
-                disabled={!isConnected || !token0Amount || !token1Amount || txLoading || !poolInfo}
-              >
-                {txLoading ? "Adding Liquidity..." : isConnected ? "Add Liquidity" : "Connect Wallet to Add"}
-              </button>
+              {token0NeedsApproval && (
+                <button
+                  onClick={() => handleApproveToken(poolInfo!.token0, "Token0")}
+                  className="w-full rounded-2xl bg-blue-500 py-4 text-base font-semibold text-white shadow-lg shadow-blue-500/30 transition hover:bg-blue-600 disabled:bg-zinc-300 disabled:text-zinc-500"
+                  disabled={!isConnected || approving || !poolInfo}
+                >
+                  {approving ? "Approving..." : "Approve Token0"}
+                </button>
+              )}
+              {token1NeedsApproval && !token0NeedsApproval && (
+                <button
+                  onClick={() => handleApproveToken(poolInfo!.token1, "Token1")}
+                  className="w-full rounded-2xl bg-blue-500 py-4 text-base font-semibold text-white shadow-lg shadow-blue-500/30 transition hover:bg-blue-600 disabled:bg-zinc-300 disabled:text-zinc-500"
+                  disabled={!isConnected || approving || !poolInfo}
+                >
+                  {approving ? "Approving..." : "Approve Token1"}
+                </button>
+              )}
+              {!token0NeedsApproval && !token1NeedsApproval && (
+                <button
+                  onClick={handleAddLiquidity}
+                  className="w-full rounded-2xl bg-emerald-500 py-4 text-base font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:bg-emerald-600 disabled:bg-zinc-300 disabled:text-zinc-500"
+                  disabled={!isConnected || !token0Amount || !token1Amount || txLoading || !poolInfo}
+                >
+                  {txLoading ? "Adding Liquidity..." : isConnected ? "Add Liquidity" : "Connect Wallet to Add"}
+                </button>
+              )}
             </div>
           ) : (
             <div className="mt-6 space-y-6">
@@ -435,7 +696,15 @@ await result.wait(); // Wait for transaction confirmation
                   <div className="space-y-2 rounded-2xl border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950/50">
                     <div className="flex items-center justify-between text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">
                       <span>LP Tokens</span>
-                      <button className="rounded-full border border-zinc-200 px-2 py-0.5 text-[11px] font-semibold text-zinc-500 transition hover:border-emerald-400 hover:text-emerald-500 dark:border-zinc-700">
+                      <button
+                        onClick={() => {
+                          if (isConnected && userLpBalance > BigInt(0)) {
+                            setLiquidityToRemove((Number(userLpBalance) / 1e18).toFixed(6));
+                          }
+                        }}
+                        disabled={!isConnected || userLpBalance === BigInt(0)}
+                        className="rounded-full border border-zinc-200 px-2 py-0.5 text-[11px] font-semibold text-zinc-500 transition hover:border-emerald-400 hover:text-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-700"
+                      >
                         Max
                       </button>
                     </div>
