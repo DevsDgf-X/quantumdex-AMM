@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.29;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title QuantumDEX Governance Token
 /// @notice ERC20 token with voting capabilities for protocol governance
 /// @dev Extends ERC20Votes to enable on-chain governance via OpenZeppelin Governor
-contract GovernanceToken is ERC20, ERC20Votes, Ownable {
+contract GovernanceToken is ERC20, ERC20Permit, ERC20Votes, Ownable {
     /// @notice Maximum supply of governance tokens
     uint256 public constant MAX_SUPPLY = 10_000_000 * 10**18; // 10 million tokens
 
