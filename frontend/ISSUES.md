@@ -257,8 +257,8 @@ Build UI to list pools by reading events or contract state; show pool details an
 
 
 ### Issue #9: Add / Remove Liquidity Components — Contract Integration
-**Status:** ❌ PENDING  
-**Labels:** `frontend`, `feature`, `liquidity`  
+**Status:** ✅ COMPLETED  
+**Labels:** `frontend`, `feature`, `liquidity`, `completed`  
 **Priority:** HIGH  
 **Depends on:** #6
 
@@ -266,36 +266,46 @@ Build UI to list pools by reading events or contract state; show pool details an
 Implement UI for adding and removing liquidity, with input validation and ratio calculation. The UI exists but needs contract integration.
 
 **Current State:**
-- Add liquidity UI exists in pool details page
-- Remove liquidity UI exists in pool details page
-- Form validation exists
-- Not connected to contract
+- ✅ Add liquidity UI exists in pool details page
+- ✅ Remove liquidity UI exists in pool details page
+- ✅ Form validation exists
+- ✅ Connected to contract
 
 **Acceptance Criteria:**
-- [ ] User can select pool to add liquidity to
-- [ ] User enters amounts for both tokens
-- [ ] Component validates ratio matches pool ratio (for existing pools)
-- [ ] Component calculates liquidity shares to mint
-- [ ] User can submit add liquidity transaction
-- [ ] Transaction sent to AMM contract's `addLiquidity` function
-- [ ] User can view their LP balance
-- [ ] User can remove liquidity by entering LP shares
-- [ ] Component calculates token amounts to receive
-- [ ] Remove liquidity transaction sent to AMM contract
-- [ ] Success/failure feedback displayed
+- [x] User can select pool to add liquidity to
+- [x] User enters amounts for both tokens
+- [x] Component validates ratio matches pool ratio (for existing pools)
+- [x] Component calculates liquidity shares to mint
+- [x] User can submit add liquidity transaction
+- [x] Transaction sent to AMM contract's `addLiquidity` function
+- [x] User can view their LP balance
+- [x] User can remove liquidity by entering LP shares
+- [x] Component calculates token amounts to receive
+- [x] Remove liquidity transaction sent to AMM contract
+- [x] Success/failure feedback displayed
+
+**Implementation Notes:**
+- Token balance fetching implemented for both token0 and token1
+- Token allowance checking and approval flow implemented
+- Ratio validation with auto-calculation for existing pools (within 1% tolerance)
+- Max button functionality for both add and remove liquidity
+- Token balances and LP balance refresh after transactions
+- Ratio warning displayed when input ratio doesn't match pool ratio
+- Improved error handling and user feedback
+- Commit: `3801471` - "feat(liquidity): add token balance and allowance fetching for add/remove liquidity"
 
 **Technical Notes:**
 - For new pools: any ratio allowed
-- For existing pools: must maintain ratio `amount0/amount1 = reserve0/reserve1`
+- For existing pools: must maintain ratio `amount0/amount1 = reserve0/reserve1` (validated within 1% tolerance)
 - Liquidity calculation: `liquidity = min(amount0 * totalSupply / reserve0, amount1 * totalSupply / reserve1)`
-- Need to approve tokens before adding liquidity
-- Show user's current LP balance from `getLpBalance`
-- **Contract Address:** Use `NEXT_PUBLIC_AMM_CONTRACT_ADDRESS` environment variable. Contract will be deployed and address provided.
+- Token approval required before adding liquidity (handled automatically)
+- User's current LP balance displayed from `getLpBalance`
+- **Contract Address:** Uses `NEXT_PUBLIC_AMM_CONTRACT_ADDRESS` environment variable
 
 ---
 
 ### Issue #10: Create Pool Component — Contract Integration
-**Status:** ❌ PENDING  
+**Status:** ✅ COMPLETED  
 **Labels:** `frontend`, `feature`, `pools`  
 **Priority:** MEDIUM  
 **Depends on:** #6
@@ -304,21 +314,29 @@ Implement UI for adding and removing liquidity, with input validation and ratio 
 Allow users to create new pools (token pair + initial liquidity) with deterministic ordering of token addresses. The UI exists but form submission not connected to contract.
 
 **Current State:**
-- Create pool page exists at `/pools/new`
-- Form has token addresses, amounts, fee tier inputs
-- Submit handler exists but needs contract integration
+- ✅ Create pool page exists at `/pools/new`
+- ✅ Form has token addresses, amounts, fee tier inputs
+- ✅ Submit handler connected to contract
+- ✅ Token approvals handled automatically
+- ✅ Decimals fetched dynamically
 
 **Acceptance Criteria:**
-- [ ] User enters two token addresses
-- [ ] Component automatically sorts tokens (token0 < token1)
-- [ ] User enters initial liquidity amounts
-- [ ] User selects fee tier (uses contract's defaultFeeBps)
-- [ ] Component validates inputs
-- [ ] User can submit create pool transaction
-- [ ] Transaction sent to AMM contract's `createPool` function
-- [ ] Pool ID calculated and displayed
-- [ ] Success redirects to pool details page
-- [ ] New pool appears in pools list
+- [x] User enters two token addresses
+- [x] Component automatically sorts tokens (token0 < token1)
+- [x] User enters initial liquidity amounts
+- [x] User selects fee tier (uses contract's defaultFeeBps)
+- [x] Component validates inputs
+- [x] User can submit create pool transaction
+- [x] Transaction sent to AMM contract's `createPool` function
+- [x] Pool ID calculated and displayed
+- [x] Success redirects to pool details page
+- [x] New pool appears in pools list
+
+**Implementation Notes:**
+- Implemented robust token sorting and decimals handling
+- Added automatic approval flow for non-ETH tokens
+- Enhanced `createPool` library function to support native ETH and custom fees
+- Commits: `a724aa5`, `80fd606`, `57d4120`
 
 **Technical Notes:**
 - Token addresses must be sorted: `token0 = min(tokenA, tokenB)`, `token1 = max(tokenA, tokenB)`
