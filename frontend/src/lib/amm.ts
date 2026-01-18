@@ -295,7 +295,16 @@ export async function addLiquidity(
 ): Promise<ContractTransactionResponse> {
   try {
     const amm = new Contract(contractAddress, DEFAULT_AMM_ABI, signer);
-    const tx = await amm.addLiquidity(poolId, amount0, amount1);
+
+    // Check if either token in the pool is native ETH to set msg.value
+    const pool = await getPool(poolId, contractAddress, signer.provider!);
+    let value = BigInt(0);
+    if (pool) {
+      if (pool.token0 === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE") value = amount0;
+      if (pool.token1 === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE") value = amount1;
+    }
+
+    const tx = await amm.addLiquidity(poolId, amount0, amount1, { value });
     return tx;
   } catch (error) {
     console.error("Error adding liquidity:", error);
@@ -336,10 +345,40 @@ export async function swap(
 ): Promise<ContractTransactionResponse> {
   try {
     const amm = new Contract(contractAddress, DEFAULT_AMM_ABI, signer);
-    const tx = await amm.swap(poolId, tokenIn, amountIn, minAmountOut, recipient);
+
+    // Set msg.value if tokenIn is native ETH
+    const value = tokenIn === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" ? amountIn : BigInt(0);
+
+    const tx = await amm.swap(poolId, tokenIn, amountIn, minAmountOut, recipient, { value });
     return tx;
   } catch (error) {
     console.error("Error executing swap:", error);
+    throw error;
+  }
+}
+
+/**
+ * Execute a multi-hop swap
+ */
+export async function swapMultiHop(
+  path: string[],
+  poolIds: string[],
+  amountIn: bigint,
+  minAmountOut: bigint,
+  recipient: string,
+  contractAddress: string,
+  signer: JsonRpcSigner
+): Promise<ContractTransactionResponse> {
+  try {
+    const amm = new Contract(contractAddress, DEFAULT_AMM_ABI, signer);
+
+    // Set msg.value if the first token in path is native ETH
+    const value = path[0] === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" ? amountIn : BigInt(0);
+
+    const tx = await amm.swapMultiHop(path, poolIds, amountIn, minAmountOut, recipient, { value });
+    return tx;
+  } catch (error) {
+    console.error("Error executing multi-hop swap:", error);
     throw error;
   }
 }
@@ -404,6 +443,7 @@ export default {
   addLiquidity,
   removeLiquidity,
   swap,
+  swapMultiHop,
   swapTokens,
   getUserLiquidity,
   getTokenBalance,
