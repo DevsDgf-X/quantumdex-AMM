@@ -250,7 +250,8 @@ export default function PoolDetailsPage({ params }: { params: Promise<{ poolId: 
       return;
     }
 
-    if (BigInt(Math.floor(parseFloat(liquidityToRemove) * 1e18)) > userLpBalance) {
+    const liquidityBigInt = parseUnits(liquidityToRemove, 18);
+    if (liquidityBigInt > userLpBalance) {
       setError("Insufficient LP balance");
       return;
     }
@@ -265,8 +266,6 @@ export default function PoolDetailsPage({ params }: { params: Promise<{ poolId: 
         throw new Error("Failed to get signer");
       }
 
-      const liquidityBigInt = parseUnits(liquidityToRemove, 18);
-
       const result = await removeLiquidity(
         poolId,
         liquidityBigInt,
@@ -276,7 +275,7 @@ export default function PoolDetailsPage({ params }: { params: Promise<{ poolId: 
 
       await result.wait(); // Wait for transaction confirmation
 
-      setSuccess(`Liquidity removed successfully! Transaction: ${result.hash}`);
+      setSuccess(`Liquidity removed successfully! Hash: ${result.hash}`);
 
       // Reset form and refresh data
       setLiquidityToRemove("");
@@ -287,8 +286,14 @@ export default function PoolDetailsPage({ params }: { params: Promise<{ poolId: 
         if (provider) {
           const pool = await getPool(poolId, AMM_CONTRACT_ADDRESS, provider);
           setPoolInfo(pool);
-          const balance = await getUserLiquidity(poolId, address, AMM_CONTRACT_ADDRESS, provider);
+          const [balance, b0, b1] = await Promise.all([
+            getUserLiquidity(poolId, address, AMM_CONTRACT_ADDRESS, provider),
+            getTokenBalance(provider, pool?.token0 || "", address, token0Decimals),
+            getTokenBalance(provider, pool?.token1 || "", address, token1Decimals)
+          ]);
           setUserLpBalance(balance);
+          setToken0Balance(b0);
+          setToken1Balance(b1);
         }
       }
     } catch (err) {
