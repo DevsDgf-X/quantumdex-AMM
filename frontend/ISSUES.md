@@ -305,7 +305,7 @@ Implement UI for adding and removing liquidity, with input validation and ratio 
 ---
 
 ### Issue #10: Create Pool Component — Contract Integration
-**Status:** ❌ PENDING  
+**Status:** ✅ COMPLETED  
 **Labels:** `frontend`, `feature`, `pools`  
 **Priority:** MEDIUM  
 **Depends on:** #6
@@ -314,21 +314,29 @@ Implement UI for adding and removing liquidity, with input validation and ratio 
 Allow users to create new pools (token pair + initial liquidity) with deterministic ordering of token addresses. The UI exists but form submission not connected to contract.
 
 **Current State:**
-- Create pool page exists at `/pools/new`
-- Form has token addresses, amounts, fee tier inputs
-- Submit handler exists but needs contract integration
+- ✅ Create pool page exists at `/pools/new`
+- ✅ Form has token addresses, amounts, fee tier inputs
+- ✅ Submit handler connected to contract
+- ✅ Token approvals handled automatically
+- ✅ Decimals fetched dynamically
 
 **Acceptance Criteria:**
-- [ ] User enters two token addresses
-- [ ] Component automatically sorts tokens (token0 < token1)
-- [ ] User enters initial liquidity amounts
-- [ ] User selects fee tier (uses contract's defaultFeeBps)
-- [ ] Component validates inputs
-- [ ] User can submit create pool transaction
-- [ ] Transaction sent to AMM contract's `createPool` function
-- [ ] Pool ID calculated and displayed
-- [ ] Success redirects to pool details page
-- [ ] New pool appears in pools list
+- [x] User enters two token addresses
+- [x] Component automatically sorts tokens (token0 < token1)
+- [x] User enters initial liquidity amounts
+- [x] User selects fee tier (uses contract's defaultFeeBps)
+- [x] Component validates inputs
+- [x] User can submit create pool transaction
+- [x] Transaction sent to AMM contract's `createPool` function
+- [x] Pool ID calculated and displayed
+- [x] Success redirects to pool details page
+- [x] New pool appears in pools list
+
+**Implementation Notes:**
+- Implemented robust token sorting and decimals handling
+- Added automatic approval flow for non-ETH tokens
+- Enhanced `createPool` library function to support native ETH and custom fees
+- Commits: `a724aa5`, `80fd606`, `57d4120`
 
 **Technical Notes:**
 - Token addresses must be sorted: `token0 = min(tokenA, tokenB)`, `token1 = max(tokenA, tokenB)`

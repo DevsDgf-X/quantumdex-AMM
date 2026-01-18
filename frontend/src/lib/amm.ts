@@ -95,7 +95,7 @@ export async function getAllPools(
       const e = event as any;
       if (!e.args) throw new Error("Event args missing");
       const { poolId, token0, token1, feeBps } = e.args;
-      
+
       return {
         poolId: poolId.toString(),
         token0,
@@ -122,7 +122,7 @@ export async function getPool(
   try {
     const amm = new Contract(contractAddress, DEFAULT_AMM_ABI, provider);
     const pool = await amm.getPool(poolId);
-    
+
     if (!pool || pool.token0 === "0x0000000000000000000000000000000000000000") {
       return null;
     }
@@ -205,6 +205,24 @@ export async function getTokenAllowance(
 }
 
 /**
+ * ERC20: Get Token Decimals
+ */
+export async function getTokenDecimals(
+  tokenAddress: string,
+  provider: Provider
+): Promise<number> {
+  try {
+    if (tokenAddress === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE") return 18;
+    const token = new Contract(tokenAddress, ERC20_ABI, provider);
+    const decimals = await token.decimals();
+    return Number(decimals);
+  } catch (error) {
+    console.error(`Error getting decimals for ${tokenAddress}:`, error);
+    return 18; // Default to 18
+  }
+}
+
+/**
  * ERC20: Approve Token
  */
 export async function approveToken(
@@ -239,7 +257,7 @@ export async function getQuote(
   try {
     // 1. Get Pool ID
     const poolId = await getPoolId(tokenIn, tokenOut, feeBps, contractAddress, provider);
-    
+
     // 2. Get Pool Data
     const pool = await getPool(poolId, contractAddress, provider);
     if (!pool) return null;
@@ -248,7 +266,7 @@ export async function getQuote(
     // dy = (dx * 997 * y) / (x * 1000 + dx * 997) for 0.3% fee
     // Note: This matches the contract's getAmountOut logic usually
     const amountInBigInt = BigInt(Math.floor(parseFloat(amountIn) * (10 ** decimalsIn)));
-    
+
     let reserveIn, reserveOut;
     // Check which token is which in the pair to determine reserves
     // Note: getPool returns token0/token1/reserve0/reserve1.
@@ -269,7 +287,7 @@ export async function getQuote(
     const amountInWithFee = amountInBigInt * feeMultiplier;
     const numerator = amountInWithFee * reserveOut;
     const denominator = (reserveIn * BigInt(10000)) + amountInWithFee;
-    
+
     return numerator / denominator;
   } catch (error) {
     console.error("Error getting quote:", error);
@@ -285,12 +303,19 @@ export async function createPool(
   tokenB: string,
   amountA: bigint,
   amountB: bigint,
+  feeBps: number,
   contractAddress: string,
   signer: JsonRpcSigner
 ): Promise<ContractTransactionResponse> {
   try {
     const amm = new Contract(contractAddress, DEFAULT_AMM_ABI, signer);
-    const tx = await amm.createPool(tokenA, tokenB, amountA, amountB);
+
+    // Calculate msg.value if either token is native ETH
+    let value = BigInt(0);
+    if (tokenA === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE") value = amountA;
+    if (tokenB === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE") value = amountB;
+
+    const tx = await amm.createPool(tokenA, tokenB, amountA, amountB, feeBps, { value });
     return tx;
   } catch (error) {
     console.error("Error creating pool:", error);
@@ -310,7 +335,16 @@ export async function addLiquidity(
 ): Promise<ContractTransactionResponse> {
   try {
     const amm = new Contract(contractAddress, DEFAULT_AMM_ABI, signer);
-    const tx = await amm.addLiquidity(poolId, amount0, amount1);
+
+    // Check if either token in the pool is native ETH to set msg.value
+    const pool = await getPool(poolId, contractAddress, signer.provider!);
+    let value = BigInt(0);
+    if (pool) {
+      if (pool.token0 === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE") value = amount0;
+      if (pool.token1 === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE") value = amount1;
+    }
+
+    const tx = await amm.addLiquidity(poolId, amount0, amount1, { value });
     return tx;
   } catch (error) {
     console.error("Error adding liquidity:", error);
@@ -351,10 +385,40 @@ export async function swap(
 ): Promise<ContractTransactionResponse> {
   try {
     const amm = new Contract(contractAddress, DEFAULT_AMM_ABI, signer);
-    const tx = await amm.swap(poolId, tokenIn, amountIn, minAmountOut, recipient);
+
+    // Set msg.value if tokenIn is native ETH
+    const value = tokenIn === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" ? amountIn : BigInt(0);
+
+    const tx = await amm.swap(poolId, tokenIn, amountIn, minAmountOut, recipient, { value });
     return tx;
   } catch (error) {
     console.error("Error executing swap:", error);
+    throw error;
+  }
+}
+
+/**
+ * Execute a multi-hop swap
+ */
+export async function swapMultiHop(
+  path: string[],
+  poolIds: string[],
+  amountIn: bigint,
+  minAmountOut: bigint,
+  recipient: string,
+  contractAddress: string,
+  signer: JsonRpcSigner
+): Promise<ContractTransactionResponse> {
+  try {
+    const amm = new Contract(contractAddress, DEFAULT_AMM_ABI, signer);
+
+    // Set msg.value if the first token in path is native ETH
+    const value = path[0] === "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" ? amountIn : BigInt(0);
+
+    const tx = await amm.swapMultiHop(path, poolIds, amountIn, minAmountOut, recipient, { value });
+    return tx;
+  } catch (error) {
+    console.error("Error executing multi-hop swap:", error);
     throw error;
   }
 }
@@ -380,7 +444,7 @@ export async function swapTokens(
     if (!provider) throw new Error("Signer must have a provider");
 
     const poolId = await getPoolId(tokenIn, tokenOut, feeBps, contractAddress, provider);
-    
+
     const amountInBigInt = BigInt(amountIn);
     const minAmountOutBigInt = BigInt(minAmountOut);
 
@@ -423,6 +487,7 @@ export default {
   addLiquidity,
   removeLiquidity,
   swap,
+  swapMultiHop,
   swapTokens,
   getUserLiquidity,
   getTokenBalance,
