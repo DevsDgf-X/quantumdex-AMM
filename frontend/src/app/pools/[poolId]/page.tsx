@@ -12,8 +12,10 @@ import {
   addLiquidity,
   removeLiquidity,
   getTokenBalance,
+  getTokenAllowance,
   getTokenDecimals,
   getTokenSymbol,
+  approveToken,
   AMM_CONTRACT_ADDRESS,
   type PoolInfo
 } from "@/lib/amm";
@@ -170,6 +172,33 @@ export default function PoolDetailsPage({ params }: { params: Promise<{ poolId: 
       const amount0BigInt = parseUnits(token0Amount, token0Decimals);
       const amount1BigInt = parseUnits(token1Amount, token1Decimals);
 
+      const provider = publicClientToProvider(publicClient);
+      if (!provider) throw new Error("Provider not available");
+
+      // Check allowances
+      setSuccess("Checking allowances...");
+      const [allowance0, allowance1] = await Promise.all([
+        getTokenAllowance(provider, poolInfo.token0, address, AMM_CONTRACT_ADDRESS),
+        getTokenAllowance(provider, poolInfo.token1, address, AMM_CONTRACT_ADDRESS)
+      ]);
+
+      // Approve Token 0 if needed
+      if (BigInt(allowance0) < amount0BigInt) {
+        setSuccess(`Approving ${token0Symbol}...`);
+        const tx = await approveToken(signer, poolInfo.token0, AMM_CONTRACT_ADDRESS);
+        await tx.wait();
+        setSuccess(`${token0Symbol} approved!`);
+      }
+
+      // Approve Token 1 if needed
+      if (BigInt(allowance1) < amount1BigInt) {
+        setSuccess(`Approving ${token1Symbol}...`);
+        const tx = await approveToken(signer, poolInfo.token1, AMM_CONTRACT_ADDRESS);
+        await tx.wait();
+        setSuccess(`${token1Symbol} approved!`);
+      }
+
+      setSuccess("Adding liquidity...");
       const result = await addLiquidity(
         poolId,
         amount0BigInt,
@@ -180,7 +209,7 @@ export default function PoolDetailsPage({ params }: { params: Promise<{ poolId: 
 
       await result.wait(); // Wait for transaction confirmation
 
-      setSuccess(`Liquidity added successfully! Transaction: ${result.hash}`);
+      setSuccess(`Liquidity added successfully! Hash: ${result.hash}`);
 
       // Reset form and refresh data
       setToken0Amount("");
