@@ -349,7 +349,7 @@ Allow users to create new pools (token pair + initial liquidity) with determinis
 ---
 
 ### Issue #11: Frontend Unit/E2E Tests
-**Status:** ❌ PENDING  
+**Status:** ✅ COMPLETED  
 **Labels:** `frontend`, `testing`, `ci/cd`  
 **Priority:** MEDIUM
 
@@ -357,9 +357,9 @@ Allow users to create new pools (token pair + initial liquidity) with determinis
 Add unit tests for helpers and integration/e2e tests for critical flows (DEX: connect, swap, add liquidity; Streaming: create stream, withdraw, refuel).
 
 **Acceptance Criteria:**
-- [ ] Unit tests for `lib/amm.ts` functions
-- [ ] Unit tests for `lib/streaming.ts` functions
-- [ ] Unit tests for `lib/utils.ts` helpers
+- [x] Unit tests for `lib/amm.ts` functions
+- [x] Unit tests for `lib/streaming.ts` functions
+- [x] Unit tests for `lib/utils.ts` helpers
 - [ ] Integration tests for wallet connection flow
 - [ ] Integration tests for DEX flows:
   - [ ] Swap flow
