@@ -513,7 +513,7 @@ Add governance mechanism to allow token holders to vote on protocol parameters (
 ## Token Streaming Protocol Issues
 
 ### Issue #16: Token Streaming Core Contract
-**Status:** ❌ PENDING  
+**Status:** ✅ COMPLETED  
 **Labels:** `smart-contracts`, `token-streaming`, `core`  
 **Priority:** HIGH
 
@@ -521,19 +521,19 @@ Add governance mechanism to allow token holders to vote on protocol parameters (
 Implement the Token Streaming protocol contract in Solidity. Port the streaming functionality to work with ERC20 tokens on Ethereum/Base. The contract should enable continuous payment streams between parties.
 
 **Acceptance Criteria:**
-- [ ] `createStream(recipient, token, initialBalance, timeframe, paymentPerBlock)` - Create a new payment stream
-- [ ] `refuel(streamId, amount)` - Add more tokens to an existing stream (sender only)
-- [ ] `withdraw(streamId)` - Withdraw accumulated tokens (recipient only)
-- [ ] `refund(streamId)` - Withdraw excess tokens after stream ends (sender only)
-- [ ] `updateStreamDetails(streamId, paymentPerBlock, timeframe, signature)` - Update stream parameters with dual-party consent
-- [ ] `getStream(streamId)` - Get stream information
-- [ ] `getWithdrawableBalance(streamId, account)` - Get withdrawable balance for an account
-- [ ] `hashStream(streamId, newPaymentPerBlock, newTimeframe)` - Get hash for signature verification
-- [ ] `validateSignature(hash, signature, signer)` - Verify ECDSA signatures
-- [ ] All events emitted (StreamCreated, StreamRefueled, TokensWithdrawn, StreamRefunded, StreamUpdated)
-- [ ] Contract compiles without errors
-- [ ] Reentrancy protection
-- [ ] Input validation
+- [x] `createStream(recipient, token, initialBalance, timeframe, paymentPerBlock)` - Create a new payment stream
+- [x] `refuel(streamId, amount)` - Add more tokens to an existing stream (sender only)
+- [x] `withdraw(streamId)` - Withdraw accumulated tokens (recipient only)
+- [x] `refund(streamId)` - Withdraw excess tokens after stream ends (sender only)
+- [x] `updateStreamDetails(streamId, paymentPerBlock, timeframe, signature)` - Update stream parameters with dual-party consent
+- [x] `getStream(streamId)` - Get stream information
+- [x] `getWithdrawableBalance(streamId, account)` - Get withdrawable balance for an account
+- [x] `hashStream(streamId, newPaymentPerBlock, newTimeframe)` - Get hash for signature verification
+- [x] `validateSignature(hash, signature, signer)` - Verify ECDSA signatures
+- [x] All events emitted (StreamCreated, StreamRefueled, TokensWithdrawn, StreamRefunded, StreamUpdated)
+- [x] Contract compiles without errors
+- [x] Reentrancy protection
+- [x] Input validation
 
 **Technical Notes:**
 - Use ERC20 tokens (not native ETH initially)
