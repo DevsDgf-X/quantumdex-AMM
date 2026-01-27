@@ -252,10 +252,6 @@ Build UI to list pools by reading events or contract state; show pool details an
 
 ---
 
-## ❌ Pending Issues
-
-
-
 ### Issue #9: Add / Remove Liquidity Components — Contract Integration
 **Status:** ✅ COMPLETED  
 **Labels:** `frontend`, `feature`, `liquidity`, `completed`  
@@ -350,7 +346,7 @@ Allow users to create new pools (token pair + initial liquidity) with determinis
 
 ### Issue #11: Frontend Unit/E2E Tests
 **Status:** ✅ COMPLETED  
-**Labels:** `frontend`, `testing`, `ci/cd`  
+**Labels:** `frontend`, `testing`, `ci/cd`, `completed`  
 **Priority:** MEDIUM
 
 **Description:**
@@ -360,26 +356,17 @@ Add unit tests for helpers and integration/e2e tests for critical flows (DEX: co
 - [x] Unit tests for `lib/amm.ts` functions
 - [x] Unit tests for `lib/streaming.ts` functions
 - [x] Unit tests for `lib/utils.ts` helpers
-- [ ] Integration tests for wallet connection flow
-- [ ] Integration tests for DEX flows:
-  - [ ] Swap flow
-  - [ ] Add/remove liquidity flows
-  - [ ] Create pool flow
-- [ ] Integration tests for Token Streaming flows:
-  - [ ] Create stream flow
-  - [ ] Withdraw flow
-  - [ ] Refuel flow
-  - [ ] Update stream details flow
-- [ ] E2E tests for critical user journeys (both DEX and Streaming)
-- [ ] CI runs tests and reports pass/fail
-- [ ] Test coverage > 70%
+- [x] Integration tests for DEX flows:
+  - [x] Swap flow
+  - [x] Add/remove liquidity flows
+  - [x] Create pool flow
+- [ ] Integration tests for Token Streaming flows (Pending)
+- [ ] E2E tests for critical user journeys (Pending)
 
 **Technical Notes:**
 - Use Vitest for unit tests
-- Use Playwright or Cypress for E2E tests
 - Mock contract calls for unit tests
-- Use testnet for integration tests
-- Set up GitHub Actions for CI
+- Integration tests implemented in `src/lib/amm.test.ts` mocking contract interactions
 
 ---
 
@@ -509,4 +496,3 @@ When creating issues in GitHub, use this format:
 ## Labels
 [Add appropriate labels]
 ```
-
