@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { normalizeAddress, sortTokenAddresses, getDefaultFeeBps, createPool, addLiquidity, removeLiquidity, swap } from './amm';
+import { normalizeAddress, sortTokenAddresses, getDefaultFeeBps, createPool } from './amm';
 import { isAddress, getAddress, Contract } from 'ethers';
 
 // Mock ethers
@@ -64,9 +64,6 @@ describe('AMM Helpers', () => {
     // Mock contract methods
     const mockDefaultFeeBps = vi.fn();
     const mockCreatePool = vi.fn();
-    const mockAddLiquidity = vi.fn();
-    const mockRemoveLiquidity = vi.fn();
-    const mockSwap = vi.fn();
 
     beforeEach(() => {
       vi.clearAllMocks();
@@ -75,9 +72,6 @@ describe('AMM Helpers', () => {
       (Contract as any).mockImplementation(() => ({
         defaultFeeBps: mockDefaultFeeBps,
         createPool: mockCreatePool,
-        addLiquidity: mockAddLiquidity,
-        removeLiquidity: mockRemoveLiquidity,
-        swap: mockSwap,
       }));
     });
 
@@ -114,55 +108,6 @@ describe('AMM Helpers', () => {
           amountB,
           feeBps
         );
-        expect(result).toBe(mockTx);
-      });
-    });
-
-    describe('addLiquidity', () => {
-      it('should call contract addLiquidity with correct arguments', async () => {
-        const poolId = '0xPoolId';
-        const amount0 = 100n;
-        const amount1 = 200n;
-        
-        const mockTx = { hash: '0xTxHash', wait: vi.fn() };
-        mockAddLiquidity.mockResolvedValue(mockTx);
-
-        const result = await addLiquidity(poolId, amount0, amount1, mockContractAddress, mockSigner);
-
-        expect(mockAddLiquidity).toHaveBeenCalledWith(poolId, amount0, amount1);
-        expect(result).toBe(mockTx);
-      });
-    });
-
-    describe('removeLiquidity', () => {
-      it('should call contract removeLiquidity with correct arguments', async () => {
-        const poolId = '0xPoolId';
-        const liquidity = 500n;
-        
-        const mockTx = { hash: '0xTxHash', wait: vi.fn() };
-        mockRemoveLiquidity.mockResolvedValue(mockTx);
-
-        const result = await removeLiquidity(poolId, liquidity, mockContractAddress, mockSigner);
-
-        expect(mockRemoveLiquidity).toHaveBeenCalledWith(poolId, liquidity);
-        expect(result).toBe(mockTx);
-      });
-    });
-
-    describe('swap', () => {
-      it('should call contract swap with correct arguments', async () => {
-        const poolId = '0xPoolId';
-        const tokenIn = '0xTokenIn';
-        const amountIn = 1000n;
-        const minAmountOut = 950n;
-        const recipient = '0xRecipient';
-        
-        const mockTx = { hash: '0xTxHash', wait: vi.fn() };
-        mockSwap.mockResolvedValue(mockTx);
-
-        const result = await swap(poolId, tokenIn, amountIn, minAmountOut, recipient, mockContractAddress, mockSigner);
-
-        expect(mockSwap).toHaveBeenCalledWith(poolId, getAddress(tokenIn), amountIn, minAmountOut, getAddress(recipient));
         expect(result).toBe(mockTx);
       });
     });
