@@ -54,13 +54,20 @@ contract TokenStreaming is ReentrancyGuard {
         uint256 initialBalance,
         Timeframe memory timeframe,
         uint256 paymentPerBlock
-    ) external nonReentrant returns (uint256) {
-        if (recipient == address(0) || token == address(0)) revert InvalidAddress();
+    ) external payable nonReentrant returns (uint256) {
+        if (recipient == address(0)) revert InvalidAddress();
         if (initialBalance == 0) revert InvalidAmount();
         if (timeframe.startBlock >= timeframe.endBlock) revert InvalidTimeframe();
         if (paymentPerBlock == 0) revert InvalidAmount();
 
-        IERC20(token).safeTransferFrom(msg.sender, address(this), initialBalance);
+        if (token == address(0)) {
+            // Handle native ETH
+            if (msg.value != initialBalance) revert InvalidAmount();
+        } else {
+            // Handle ERC20
+            if (msg.value > 0) revert InvalidAmount(); // Should not send ETH with ERC20 call
+            IERC20(token).safeTransferFrom(msg.sender, address(this), initialBalance);
+        }
 
         _streamIdCounter++;
         uint256 streamId = _streamIdCounter;
@@ -81,13 +88,21 @@ contract TokenStreaming is ReentrancyGuard {
         return streamId;
     }
 
-    function refuel(uint256 streamId, uint256 amount) external nonReentrant {
+    function refuel(uint256 streamId, uint256 amount) external payable nonReentrant {
         Stream storage stream = streams[streamId];
         if (!stream.isActive) revert StreamNotActive();
         if (msg.sender != stream.sender) revert Unauthorized();
         if (amount == 0) revert InvalidAmount();
 
-        IERC20(stream.token).safeTransferFrom(msg.sender, address(this), amount);
+        if (stream.token == address(0)) {
+            // Handle native ETH
+            if (msg.value != amount) revert InvalidAmount();
+        } else {
+            // Handle ERC20
+            if (msg.value > 0) revert InvalidAmount();
+            IERC20(stream.token).safeTransferFrom(msg.sender, address(this), amount);
+        }
+        
         stream.balance += amount;
 
         emit StreamRefueled(streamId, amount);
@@ -104,7 +119,14 @@ contract TokenStreaming is ReentrancyGuard {
         stream.withdrawnAmount += withdrawable;
         stream.balance -= withdrawable;
 
-        IERC20(stream.token).safeTransfer(stream.recipient, withdrawable);
+        if (stream.token == address(0)) {
+            // Handle native ETH
+            (bool success, ) = stream.recipient.call{value: withdrawable}("");
+            if (!success) revert InvalidAddress(); // Transfer failed
+        } else {
+            // Handle ERC20
+            IERC20(stream.token).safeTransfer(stream.recipient, withdrawable);
+        }
 
         emit TokensWithdrawn(streamId, stream.recipient, withdrawable);
     }
@@ -124,7 +146,15 @@ contract TokenStreaming is ReentrancyGuard {
         if (stream.balance > totalNeeded) {
             uint256 refundAmount = stream.balance - totalNeeded;
             stream.balance -= refundAmount;
-            IERC20(stream.token).safeTransfer(stream.sender, refundAmount);
+            
+            if (stream.token == address(0)) {
+                // Handle native ETH
+                (bool success, ) = stream.sender.call{value: refundAmount}("");
+                if (!success) revert InvalidAddress();
+            } else {
+                // Handle ERC20
+                IERC20(stream.token).safeTransfer(stream.sender, refundAmount);
+            }
             emit StreamRefunded(streamId, stream.sender, refundAmount);
         }
     }

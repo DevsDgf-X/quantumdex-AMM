@@ -124,11 +124,9 @@ describe("TokenStreaming", function () {
     });
 
     it("Should allow recipient to withdraw accrued tokens", async function () {
-      // Mine blocks to accrue tokens
       await time.advanceBlockTo(startBlock + 10n);
       
       const currentBlock = BigInt(await ethers.provider.getBlockNumber());
-      // withdrawal transaction will mine another block
       const expectedWithdrawable = (currentBlock + 1n - startBlock) * PAYMENT_PER_BLOCK;
       const initialRecipientBalance = await mockToken.balanceOf(recipient.address);
 
@@ -226,6 +224,79 @@ describe("TokenStreaming", function () {
       const stream = await tokenStreaming.streams(streamId);
       expect(stream.paymentPerBlock).to.equal(newPaymentPerBlock);
       expect(stream.timeframe.startBlock).to.equal(newTimeframe.startBlock);
+    });
+  });
+
+  describe("Native ETH Streaming", function () {
+    it("Should create stream with native ETH", async function () {
+      const currentBlock = BigInt(await ethers.provider.getBlockNumber());
+      const timeframe = {
+        startBlock: currentBlock + 10n,
+        endBlock: currentBlock + 110n,
+      };
+
+      await expect(tokenStreaming.connect(sender).createStream(
+        recipient.address,
+        ethers.ZeroAddress,
+        INITIAL_BALANCE,
+        timeframe,
+        PAYMENT_PER_BLOCK,
+        { value: INITIAL_BALANCE }
+      )).to.emit(tokenStreaming, "StreamCreated")
+        .withArgs(1, sender.address, recipient.address, ethers.ZeroAddress, INITIAL_BALANCE);
+      
+      const stream = await tokenStreaming.streams(1);
+      expect(stream.token).to.equal(ethers.ZeroAddress);
+      expect(stream.balance).to.equal(INITIAL_BALANCE);
+    });
+
+    it("Should fail if msg.value does not match initialBalance for ETH stream", async function () {
+      const currentBlock = BigInt(await ethers.provider.getBlockNumber());
+      const timeframe = { startBlock: currentBlock + 10n, endBlock: currentBlock + 110n };
+      
+      await expect(tokenStreaming.connect(sender).createStream(
+        recipient.address,
+        ethers.ZeroAddress,
+        INITIAL_BALANCE,
+        timeframe,
+        PAYMENT_PER_BLOCK,
+        { value: INITIAL_BALANCE - 1n }
+      )).to.be.revertedWithCustomError(tokenStreaming, "InvalidAmount");
+    });
+
+    it("Should allow withdrawal of native ETH", async function () {
+      const currentBlock = BigInt(await ethers.provider.getBlockNumber());
+      const startBlock = currentBlock + 10n;
+      const timeframe = {
+        startBlock: startBlock,
+        endBlock: startBlock + 110n,
+      };
+
+      await tokenStreaming.connect(sender).createStream(
+        recipient.address,
+        ethers.ZeroAddress,
+        INITIAL_BALANCE,
+        timeframe,
+        PAYMENT_PER_BLOCK,
+        { value: INITIAL_BALANCE }
+      );
+      const streamId = 1n;
+
+      await time.advanceBlockTo(startBlock + 10n);
+      const expectedWithdrawable = PAYMENT_PER_BLOCK * 10n;
+      
+      const recipientBalanceBefore = await ethers.provider.getBalance(recipient.address);
+      
+      const tx = await tokenStreaming.connect(recipient).withdraw(streamId);
+      const receipt = await tx.wait();
+      const gasUsed = receipt!.gasUsed * receipt!.gasPrice;
+
+      const recipientBalanceAfter = await ethers.provider.getBalance(recipient.address);
+      
+      expect(recipientBalanceAfter).to.be.closeTo(
+        recipientBalanceBefore + expectedWithdrawable - gasUsed, 
+        ethers.parseEther("2") 
+      );
     });
   });
 });
