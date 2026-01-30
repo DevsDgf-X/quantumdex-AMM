@@ -373,7 +373,7 @@ Add unit tests for helpers and integration/e2e tests for critical flows (DEX: co
 ## Token Streaming Issues
 
 ### Issue #12: Port Token Streaming Contract Library (`lib/streaming.ts`)
-**Status:** ❌ PENDING  
+**Status:** ✅ COMPLETED  
 **Labels:** `frontend`, `token-streaming`, `critical`, `blocking`  
 **Priority:** HIGH
 
@@ -381,18 +381,18 @@ Add unit tests for helpers and integration/e2e tests for critical flows (DEX: co
 Implement ethers contract wrappers to call Token Streaming contract functions and read events. Create `lib/streaming.ts` with functions to interact with the streaming protocol.
 
 **Acceptance Criteria:**
-- [ ] `getAllStreams(contractAddress, provider)` - Reads StreamCreated events from contract
-- [ ] `getStream(streamId, contractAddress, provider)` - Reads stream data using `getStream(uint256)` function
-- [ ] `createStream(recipient, token, initialBalance, timeframe, paymentPerBlock, contractAddress, signer)` - Calls contract's `createStream` function
-- [ ] `refuel(streamId, amount, contractAddress, signer)` - Calls contract's `refuel` function
-- [ ] `withdraw(streamId, contractAddress, signer)` - Calls contract's `withdraw` function (recipient)
-- [ ] `refund(streamId, contractAddress, signer)` - Calls contract's `refund` function (sender)
-- [ ] `updateStreamDetails(streamId, paymentPerBlock, timeframe, signature, signerAddress, contractAddress, signer)` - Calls contract's `updateStreamDetails` function
-- [ ] `getWithdrawableBalance(streamId, account, contractAddress, provider)` - Calls contract's `getWithdrawableBalance` function
-- [ ] `hashStream(streamId, newPaymentPerBlock, newTimeframe, contractAddress, provider)` - Calls contract's `hashStream` function for signature generation
-- [ ] All functions return expected types matching the contract interface
-- [ ] Functions handle errors appropriately
-- [ ] STREAMING_CONTRACT_ADDRESS constant exported
+- [x] `getAllStreams(contractAddress, provider)` - Reads StreamCreated events from contract
+- [x] `getStream(streamId, contractAddress, provider)` - Reads stream data using `getStream(uint256)` function
+- [x] `createStream(recipient, token, initialBalance, timeframe, paymentPerBlock, contractAddress, signer)` - Calls contract's `createStream` function
+- [x] `refuel(streamId, amount, contractAddress, signer)` - Calls contract's `refuel` function
+- [x] `withdraw(streamId, contractAddress, signer)` - Calls contract's `withdraw` function (recipient)
+- [x] `refund(streamId, contractAddress, signer)` - Calls contract's `refund` function (sender)
+- [x] `updateStreamDetails(streamId, paymentPerBlock, timeframe, signature, signerAddress, contractAddress, signer)` - Calls contract's `updateStreamDetails` function
+- [x] `getWithdrawableBalance(streamId, account, contractAddress, provider)` - Calls contract's `getWithdrawableBalance` function
+- [x] `hashStream(streamId, newPaymentPerBlock, newTimeframe, contractAddress, provider)` - Calls contract's `hashStream` function for signature generation
+- [x] All functions return expected types matching the contract interface
+- [x] Functions handle errors appropriately
+- [x] STREAMING_CONTRACT_ADDRESS constant exported
 
 **Technical Notes:**
 - Token Streaming contract uses `uint256 streamId`
